@@ -45,7 +45,7 @@ The site appears at `https://debruynbrycedbb.github.io/Larita-s-Book-Shelf/` aft
 
 **Each book's page** has the synopsis under the book, a rating out of 10 stars, the owner's review, favourite quotes (with optional page) and comments.
 
-**Adding books.** Search Open Library by title, author or ISBN, or add a book by hand. The Catalan and English titles are filled from Open Library's editions when it has them; you choose which language you're typing in. The cover's shape sets the book's width, the page count its thickness, and the spine colour is taken from the cover and toned so every spine shares the same look — all editable. Uploaded cover photos are shrunk to a small WebP and stored with the book.
+**Adding books.** Search by title, author or ISBN — Google Books and Open Library are searched together, duplicates merged and Catalan editions listed first; «Només edicions en català» (on by default) hides the rest. Or add a book by hand. Catalan synopses usually come from Google Books; the other-language title comes from Open Library’s editions; you choose which language you're typing in. The cover's shape sets the book's width, the page count its thickness, and the spine colour is taken from the cover and toned so every spine shares the same look — all editable. Uploaded cover photos are shrunk to a small WebP and stored with the book.
 
 **Titles** show in Catalan by default; the CA / EN switch at the top shows English titles instead (remembered in that browser). A book with only one title shows that one in both modes.
 

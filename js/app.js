@@ -571,7 +571,9 @@
     fiction: 'Ficció', novel: 'Novel·la', novels: 'Novel·la', poetry: 'Poesia', essays: 'Assaig', essay: 'Assaig',
     biography: 'Biografia', history: 'Història', philosophy: 'Filosofia', memoir: 'Memòries',
     'short stories': 'Contes', 'science fiction': 'Ciència-ficció', fantasy: 'Fantasia', romance: 'Romàntica',
-    thriller: 'Thriller', thrillers: 'Thriller', mystery: 'Misteri', drama: 'Teatre', 'young adult fiction': 'Juvenil'
+    thriller: 'Thriller', thrillers: 'Thriller', mystery: 'Misteri', drama: 'Teatre', 'young adult fiction': 'Juvenil',
+    'literary criticism': 'Assaig', 'juvenile fiction': 'Infantil', 'biography & autobiography': 'Biografia',
+    'literary collections': 'Antologia', 'comics & graphic novels': 'Còmic', cooking: 'Cuina', travel: 'Viatges'
   };
 
   function emptyDraft(list) {
@@ -690,98 +692,221 @@
     }
   }
 
-  // Open Library search
+  // ------------------------------------------------------------ search
+  //
+  // Google Books and Open Library are asked at the same time. Results are
+  // merged (same ISBN or same title + author counts as one book), Catalan
+  // editions first. "Només edicions en català" keeps only Catalan editions.
+
+  const LANG3 = { cat: 'ca', eng: 'en', spa: 'es', fre: 'fr', ger: 'de', ita: 'it', por: 'pt' };
+  const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const httpsUrl = u => (u ? u.replace(/^http:/, 'https:') : null);
+  const stripHtml = t => String(t || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#39;/g, '’').trim();
+
+  function onlyCatalan() { return $('only-ca').checked; }
+
+  async function searchGoogle(q, isbn, ca) {
+    const key = window.SHELF_CONFIG.googleBooksKey;
+    if (!key) return [];
+    const p = new URLSearchParams({ q: isbn ? `isbn:${isbn}` : q, maxResults: '20', printType: 'books', key });
+    if (ca) p.set('langRestrict', 'ca');
+    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?${p}`);
+    if (!res.ok) throw new Error('google ' + res.status);
+    const json = await res.json();
+    return (json.items || []).map(it => {
+      const v = it.volumeInfo || {};
+      const ids = v.industryIdentifiers || [];
+      const isbn13 = (ids.find(x => x.type === 'ISBN_13') || ids.find(x => x.type === 'ISBN_10') || {}).identifier || null;
+      const img = v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail);
+      return {
+        src: 'google', id: it.id,
+        title: v.title,
+        authors: v.authors || [],
+        year: v.publishedDate ? parseInt(v.publishedDate, 10) || null : null,
+        pages: v.pageCount || null,
+        lang: v.language || null,
+        isbn: isbn13,
+        thumb: httpsUrl(img),
+        cover: img ? httpsUrl(img).replace(/&edge=curl/, '').replace(/&zoom=\d/, '&zoom=1') + '&fife=w600' : null,
+        description: stripHtml(v.description),
+        categories: v.categories || []
+      };
+    }).filter(r => r.title);
+  }
+
+  async function searchOpenLibrary(q, isbn, ca) {
+    const p = new URLSearchParams({
+      fields: 'key,title,author_name,first_publish_year,number_of_pages_median,cover_i,isbn,subject,language',
+      limit: '12'
+    });
+    if (isbn) p.set('isbn', isbn); else p.set('q', q);
+    if (ca) p.set('language', 'cat');
+    const res = await fetch(`https://openlibrary.org/search.json?${p}`);
+    if (!res.ok) throw new Error('openlibrary ' + res.status);
+    const json = await res.json();
+    return (json.docs || []).filter(d => d.title).map(d => {
+      const langs = (d.language || []).map(l => LANG3[l] || l);
+      return {
+        src: 'ol', key: d.key,
+        title: d.title,
+        authors: d.author_name || [],
+        year: d.first_publish_year ?? null,
+        pages: d.number_of_pages_median ?? null,
+        lang: ca ? 'ca' : (langs.length === 1 ? langs[0] : null),
+        langs,
+        isbn: (d.isbn || [])[0] || null,
+        thumb: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-S.jpg` : null,
+        cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg` : null,
+        description: '',
+        categories: d.subject || []
+      };
+    });
+  }
+
+  function mergeResults(google, ol, ca) {
+    const out = [];
+    const sameBook = (a, b) =>
+      (a.isbn && b.isbn && a.isbn === b.isbn) ||
+      (norm(a.title) === norm(b.title) && norm(a.authors[0]) === norm(b.authors[0]) && (a.lang === b.lang || !a.lang || !b.lang));
+    for (const r of [...google, ...ol]) {
+      if (ca && r.lang && r.lang !== 'ca') continue;
+      const twin = out.find(o => sameBook(o, r));
+      if (!twin) { out.push(r); continue; }
+      // Fill gaps from the second source
+      for (const k of ['year', 'pages', 'isbn', 'thumb', 'cover', 'lang']) if (!twin[k] && r[k]) twin[k] = r[k];
+      if (!twin.description && r.description) twin.description = r.description;
+      if (r.src === 'ol') twin.olKey = r.key;
+      if (r.src === 'google') twin.googleId = r.id;
+    }
+    const score = r => (r.lang === 'ca' ? 0 : 2) + (r.cover ? 0 : 1);
+    return out.map((r, i) => ({ r, i })).sort((a, b) => score(a.r) - score(b.r) || a.i - b.i).map(x => x.r).slice(0, 16);
+  }
+
   async function search(q) {
     const seq = ++state.searchSeq;
     const status = $('search-status');
     const list = $('results');
     list.innerHTML = '';
     status.textContent = 'Cercant…';
-    const isbn = q.replace(/[-\s]/g, '');
-    const params = new URLSearchParams({
-      fields: 'key,title,author_name,first_publish_year,number_of_pages_median,cover_i,isbn,subject',
-      limit: '12'
-    });
-    if (/^(\d{9}[\dXx]|\d{13})$/.test(isbn)) params.set('isbn', isbn); else params.set('q', q);
-    try {
-      const res = await fetch(`https://openlibrary.org/search.json?${params}`);
-      if (!res.ok) throw new Error(res.status);
-      const json = await res.json();
-      if (seq !== state.searchSeq) return;
-      const docs = (json.docs || []).filter(d => d.title);
-      status.textContent = docs.length ? plural(docs.length, 'resultat', 'resultats') : 'No s’ha trobat res. Prova amb altres paraules o afegeix-lo a mà.';
-      for (const doc of docs) list.appendChild(resultItem(doc));
-    } catch (e) {
-      if (seq !== state.searchSeq) return;
-      console.error(e);
+    const digits = q.replace(/[-\s]/g, '');
+    const isbn = /^(\d{9}[\dXx]|\d{13})$/.test(digits) ? digits : null;
+    const ca = onlyCatalan();
+    const [g, o] = await Promise.allSettled([searchGoogle(q, isbn, ca), searchOpenLibrary(q, isbn, ca)]);
+    if (seq !== state.searchSeq) return;
+    if (g.status === 'rejected') console.error(g.reason);
+    if (o.status === 'rejected') console.error(o.reason);
+    if (g.status === 'rejected' && o.status === 'rejected') {
       status.textContent = 'La cerca no està disponible ara mateix. Encara pots afegir el llibre a mà.';
+      return;
     }
+    const results = mergeResults(g.value || [], o.value || [], ca);
+    if (!results.length) {
+      status.textContent = ca
+        ? 'No s’ha trobat cap edició en català. Prova amb altres paraules o desmarca «Només edicions en català».'
+        : 'No s’ha trobat res. Prova amb altres paraules o afegeix-lo a mà.';
+      return;
+    }
+    status.textContent = plural(results.length, 'resultat', 'resultats');
+    for (const r of results) list.appendChild(resultItem(r));
   }
 
-  function resultItem(doc) {
+  const LANG_LABEL = { ca: 'CA', en: 'EN', es: 'ES', fr: 'FR', de: 'DE', it: 'IT', pt: 'PT' };
+
+  function resultItem(r) {
     const li = document.createElement('li');
     const btn = el('button', 'result');
     btn.type = 'button';
     const thumb = el('span', 'result-thumb');
-    if (doc.cover_i) {
+    if (r.thumb) {
       const img = document.createElement('img');
       img.alt = '';
       img.loading = 'lazy';
-      img.src = `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`;
+      img.referrerPolicy = 'no-referrer';
+      img.src = r.thumb;
+      img.onerror = () => img.remove();
       thumb.appendChild(img);
     }
     const text = el('span', 'result-text');
     text.append(
-      el('span', 'result-title', doc.title),
-      el('span', 'result-meta', [doc.author_name && doc.author_name.slice(0, 2).join(', '), doc.first_publish_year].filter(Boolean).join(' · '))
+      el('span', 'result-title', r.title),
+      el('span', 'result-meta', [r.authors.slice(0, 2).join(', '), r.year].filter(Boolean).join(' · '))
     );
     btn.append(thumb, text);
-    btn.addEventListener('click', () => pickResult(doc, btn));
+    if (r.lang && LANG_LABEL[r.lang]) {
+      const tag = el('span', 'result-lang' + (r.lang === 'ca' ? ' ca' : ''), LANG_LABEL[r.lang]);
+      tag.title = r.lang === 'ca' ? 'Edició en català' : 'Edició en una altra llengua';
+      btn.appendChild(tag);
+    }
+    btn.addEventListener('click', () => pickResult(r, btn));
     li.appendChild(btn);
     return li;
   }
 
   function genreFrom(subjects) {
     for (const s of subjects || []) {
-      const k = s.toLowerCase().trim();
-      if (GENRES[k]) return GENRES[k];
+      for (const part of String(s).split('/')) {
+        const k = part.toLowerCase().trim();
+        if (GENRES[k]) return GENRES[k];
+      }
     }
     return '';
   }
 
-  async function pickResult(doc, btn) {
+  const getJson = url => fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null);
+
+  // Colour for the spine. Google's images can't be read by the page, so try
+  // Open Library's copy of the same cover (by ISBN) before giving up.
+  async function coverColour(r) {
+    if (r.cover && r.cover.includes('openlibrary.org')) return Books.sampleColour(r.cover);
+    if (r.isbn) {
+      const ol = `https://covers.openlibrary.org/b/isbn/${r.isbn}-M.jpg?default=false`;
+      if (await Books.measureAspect(ol)) return Books.sampleColour(ol);
+    }
+    return null;
+  }
+
+  async function pickResult(r, btn) {
     for (const b of document.querySelectorAll('.result')) b.classList.toggle('is-picked', b === btn);
-    const cover = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : null;
+    const isCa = r.lang === 'ca';
     state.draft = {
       ...emptyDraft(state.newList),
-      title: '',
-      title_en: doc.title,
-      author: (doc.author_name || []).join(', '),
-      year: doc.first_publish_year ?? null,
-      pages: doc.number_of_pages_median ?? null,
-      genre: genreFrom(doc.subject),
-      cover_url: cover,
-      isbn: (doc.isbn || [])[0] || null,
-      source: `openlibrary:${doc.key}`
+      title: isCa ? r.title : '',
+      title_en: r.lang === 'en' || (!isCa && !r.lang) ? r.title : '',
+      author: r.authors.join(', '),
+      year: r.year,
+      pages: r.pages,
+      genre: genreFrom(r.categories),
+      description: r.description ? r.description.slice(0, 4000) : '',
+      cover_url: r.cover,
+      isbn: r.isbn,
+      source: r.src === 'google' ? `google:${r.id}` : `openlibrary:${r.key}`
     };
+    // A title in another language (e.g. Spanish) goes in the Catalan box so it
+    // isn't lost; it can be corrected there.
+    if (!state.draft.title && !state.draft.title_en) state.draft.title = r.title;
     showForm(true);
     $('book-form').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
 
     const draft = state.draft;
-    // Details that need more requests: cover shape and colour, synopsis, and
-    // the Catalan / English titles from Open Library's editions.
+    // Find the Open Library work for the other-language title and, if needed,
+    // a synopsis.
+    let olKey = r.src === 'ol' ? r.key : r.olKey;
+    if (!olKey && r.isbn) {
+      const j = await getJson(`https://openlibrary.org/search.json?isbn=${r.isbn}&fields=key&limit=1`);
+      olKey = j && j.docs && j.docs[0] && j.docs[0].key;
+    }
     const [aspect, colour, work, editions] = await Promise.all([
-      Books.measureAspect(cover),
-      Books.sampleColour(cover),
-      fetch(`https://openlibrary.org${doc.key}.json`).then(r => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(`https://openlibrary.org${doc.key}/editions.json?limit=200`).then(r => (r.ok ? r.json() : null)).catch(() => null)
+      Books.measureAspect(r.cover),
+      coverColour(r),
+      olKey && !draft.description ? getJson(`https://openlibrary.org${olKey}.json`) : null,
+      olKey ? getJson(`https://openlibrary.org${olKey}/editions.json?limit=200`) : null
     ]);
     if (state.draft !== draft) return;
-    if (cover && aspect == null) { draft.cover_url = null; $('f-cover-clear').hidden = true; }
+    if (r.cover && aspect == null) { draft.cover_url = null; $('f-cover-clear').hidden = true; }
     if (aspect) draft.cover_aspect = aspect;
-    if (colour) { draft.cover_tone = colour; if (!draft.spine_color) draft.spine_color = colour; }
+    if (colour) { draft.cover_tone = colour; draft.spine_color = colour; }
     const text = work && (typeof work.description === 'string' ? work.description : work.description && work.description.value);
-    if (text && !$('f-desc').value) {
+    if (text && !$('f-desc').value.trim()) {
       draft.description = text.replace(/\r/g, '').replace(/\(\[source\]\[\d+\]\)|\[\d+\]:.*$/gm, '').replace(/-{3,}[\s\S]*$/, '').trim().slice(0, 4000);
       $('f-desc').value = draft.description;
     }
@@ -789,7 +914,8 @@
     const inLang = code => entries.find(e => (e.languages || []).some(l => l.key === `/languages/${code}`) && e.title);
     const ca = inLang('cat'), en = inLang('eng');
     if (ca && !$('f-title').value.trim()) { draft.title = ca.title; $('f-title').value = ca.title; }
-    if (en && en.title) { draft.title_en = en.title; $('f-title-en').value = en.title; }
+    if (en && !$('f-title-en').value.trim()) { draft.title_en = en.title; $('f-title-en').value = en.title; }
+    readForm();
     setTitleLang(draft.title ? 'ca' : 'en');
     renderSwatches();
     renderPreview();
@@ -858,6 +984,12 @@
   }
 
   function bindEdit() {
+    try { $('only-ca').checked = localStorage.getItem('shelf-only-ca') !== '0'; } catch (_) { $('only-ca').checked = true; }
+    $('only-ca').addEventListener('change', () => {
+      try { localStorage.setItem('shelf-only-ca', $('only-ca').checked ? '1' : '0'); } catch (_) { /* fine */ }
+      const q = $('search-q').value.trim();
+      if (q.length >= 2 && $('results').childElementCount) search(q);
+    });
     $('search-form').addEventListener('submit', e => {
       e.preventDefault();
       const q = $('search-q').value.trim();
