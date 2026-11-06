@@ -11,7 +11,7 @@
     auth: { persistSession: true, autoRefreshToken: true, storageKey: 'larita-shelf-auth' }
   });
 
-  const COLS = 'id,profile_id,title,title_en,author,year,pages,genre,description,cover_url,cover_data,cover_aspect,spine_color,isbn,source,list,rating,review,created_at';
+  const COLS = 'id,profile_id,title,title_en,author,year,pages,genre,description,cover_url,cover_data,cover_aspect,spine_color,isbn,source,list,rating,review,section,age_min,age_max,created_at';
 
   // Friendly messages for problems people can act on.
   function explain(error) {

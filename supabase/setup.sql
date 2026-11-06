@@ -1,5 +1,5 @@
 -- ============================================================================
--- Larita's Book Shelf — database setup (version 2)
+-- Larita's Book Shelf — database setup (version 3)
 --
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.
 -- It is safe to run again after changes (idempotent) and it upgrades an
@@ -104,12 +104,19 @@ alter table public.books add column if not exists list   text not null default '
 alter table public.books add column if not exists rating smallint;
 alter table public.books add column if not exists review text;
 
+-- Version 3: children's shelf ('kids') beside the main one, with an age range
+alter table public.books add column if not exists section text not null default 'main';
+alter table public.books add column if not exists age_min smallint;
+alter table public.books add column if not exists age_max smallint;
+
 alter table public.books drop constraint if exists books_title_check;
 alter table public.books drop constraint if exists books_titles_check;
 alter table public.books drop constraint if exists books_title_en_check;
 alter table public.books drop constraint if exists books_list_check;
 alter table public.books drop constraint if exists books_rating_check;
 alter table public.books drop constraint if exists books_review_check;
+alter table public.books drop constraint if exists books_section_check;
+alter table public.books drop constraint if exists books_age_check;
 alter table public.books add constraint books_titles_check
   check (coalesce(char_length(btrim(title)), 0) + coalesce(char_length(btrim(title_en)), 0) > 0);
 alter table public.books add constraint books_title_check    check (title is null or char_length(title) <= 300);
@@ -117,6 +124,11 @@ alter table public.books add constraint books_title_en_check check (title_en is 
 alter table public.books add constraint books_list_check     check (list in ('shelf', 'wishlist'));
 alter table public.books add constraint books_rating_check   check (rating is null or rating between 1 and 10);
 alter table public.books add constraint books_review_check   check (review is null or char_length(review) <= 6000);
+alter table public.books add constraint books_section_check  check (section in ('main', 'kids'));
+alter table public.books add constraint books_age_check      check (
+  (age_min is null or age_min between 0 and 18) and
+  (age_max is null or age_max between 0 and 18) and
+  (age_min is null or age_max is null or age_min <= age_max));
 
 create index if not exists books_profile on public.books (profile_id);
 
@@ -328,14 +340,17 @@ as $$
 $$;
 
 -- Every shelf with its counts, for the members page. Members only.
-create or replace function public.list_shelves()
-returns table (id uuid, display_name text, read_count bigint, wish_count bigint, created_at timestamptz)
+-- (Version 3 added kids_count, so the old function is dropped first.)
+drop function if exists public.list_shelves();
+create function public.list_shelves()
+returns table (id uuid, display_name text, read_count bigint, wish_count bigint, kids_count bigint, created_at timestamptz)
 language sql stable security definer
 set search_path = ''
 as $$
   select p.id, p.display_name,
-         count(b.id) filter (where b.list = 'shelf'),
-         count(b.id) filter (where b.list = 'wishlist'),
+         count(b.id) filter (where b.section = 'main' and b.list = 'shelf'),
+         count(b.id) filter (where b.section = 'main' and b.list = 'wishlist'),
+         count(b.id) filter (where b.section = 'kids'),
          p.created_at
     from public.profiles p
     left join public.books b on b.profile_id = p.id

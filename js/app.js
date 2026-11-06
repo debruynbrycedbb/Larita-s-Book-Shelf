@@ -3,9 +3,11 @@
  * Routes (in the address after #):
  *   #/                    my shelf (books I've read)
  *   #/per-llegir          my wishlist
- *   #/u/<id>              someone else's shelf      (#/u/<id>/per-llegir)
+ *   #/infantil            my children's shelf       (#/infantil/per-llegir)
+ *   #/u/<id>              someone else's shelf      (#/u/<id>/per-llegir,
+ *                                                    #/u/<id>/infantil[/per-llegir])
  *   #/llibre/<id>         one book
- *   #/afegeix             add a book                (#/afegeix/per-llegir)
+ *   #/afegeix             add a book                (#/afegeix[/infantil][/per-llegir])
  *   #/edita/<id>          edit a book
  *   #/prestatgeries       everyone's shelves
  *   #/entra               sign in or create a shelf
@@ -23,7 +25,9 @@
     me: null,
     owner: null,        // { id, name } of the shelf being viewed
     list: 'shelf',      // 'shelf' | 'wishlist'
+    section: 'main',    // 'main' | 'kids'
     decade: 'all',
+    ageFilter: null,    // [min, max] on the children's shelf
     cache: new Map(),   // profile id → books
     books: [],          // books of the shelf being viewed (both lists)
     shelfKey: '',
@@ -58,13 +62,96 @@
     });
   }
 
+  // ------------------------------------------------- ages and school years
+  // Catalan school years by the age a child turns during that year.
+  const CURS_SHORT = ['', '', '', 'P3', 'P4', 'P5', '1r', '2n', '3r', '4t', '5è', '6è', '1r', '2n', '3r', '4t', '1r', '2n', ''];
+  const stageOf = a => (a <= 2 ? 'llar' : a <= 5 ? 'inf' : a <= 11 ? 'pri' : a <= 15 ? 'eso' : a <= 17 ? 'bat' : 'adult');
+  const STAGE_SUFFIX = { pri: 'de Primària', eso: 'd’ESO', bat: 'de Batxillerat' };
+  function cursName(a) {
+    const st = stageOf(a);
+    if (st === 'llar') return 'Llar d’infants';
+    if (st === 'inf') return `${CURS_SHORT[a]} (Educació Infantil)`;
+    if (st === 'adult') return '';
+    return `${CURS_SHORT[a]} ${STAGE_SUFFIX[st]}`;
+  }
+  function ageRange(b) {
+    const lo = b.age_min ?? b.age_max, hi = b.age_max ?? b.age_min;
+    return lo == null ? null : [lo, hi];
+  }
+  const anys = n => (n === 1 ? '1 any' : n >= 18 ? '18 anys o més' : `${n} anys`);
+  function ageText(b) {
+    if (b.age_min == null && b.age_max == null) return '';
+    if (b.age_max == null) return `A partir de ${anys(b.age_min)}`;
+    if (b.age_min == null) return `Fins a ${anys(b.age_max)}`;
+    if (b.age_min === b.age_max) return anys(b.age_min);
+    if (b.age_max >= 18) return `A partir de ${anys(b.age_min)}`;
+    return `De ${b.age_min} a ${anys(b.age_max)}`;
+  }
+  function cursText(b) {
+    const r = ageRange(b);
+    if (!r) return '';
+    let [lo, hi] = r;
+    hi = Math.min(hi, 17);
+    if (lo > 17) return '';
+    const a = stageOf(lo), z = stageOf(hi);
+    if (lo === hi) return cursName(lo);
+    if (a === z) {
+      if (a === 'llar') return 'Llar d’infants';
+      if (a === 'inf') return `${CURS_SHORT[lo]}–${CURS_SHORT[hi]} (Educació Infantil)`;
+      return `${CURS_SHORT[lo]}–${CURS_SHORT[hi]} ${STAGE_SUFFIX[a]}`;
+    }
+    const short = x => (stageOf(x) === 'inf' ? CURS_SHORT[x] : cursName(x));
+    return `${short(lo)} – ${short(hi)}`;
+  }
+  function fillAgeSelect(sel, value, emptyLabel) {
+    sel.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = emptyLabel;
+    sel.appendChild(none);
+    for (let a = 0; a <= 18; a++) {
+      const o = document.createElement('option');
+      o.value = String(a);
+      const c = cursName(a);
+      o.textContent = c ? `${anys(a)} · ${c}` : anys(a);
+      sel.appendChild(o);
+    }
+    sel.value = value == null ? '' : String(value);
+  }
+  const readAge = sel => (sel.value === '' ? null : Number(sel.value));
+  // Keep "Des de" ≤ "Fins a"
+  function pairAges(from, to) {
+    const fix = changed => {
+      const a = readAge(from), b = readAge(to);
+      if (a != null && b != null && a > b) { if (changed === from) to.value = from.value; else from.value = to.value; }
+    };
+    from.addEventListener('change', () => fix(from));
+    to.addEventListener('change', () => fix(to));
+  }
+  // School-year groups for the "Curs" filter
+  const CURS_FILTERS = [
+    ['Llar d’infants (0–2 anys)', 0, 2], ['P3', 3, 3], ['P4', 4, 4], ['P5', 5, 5],
+    ...[6, 7, 8, 9, 10, 11].map(a => [`${cursName(a)}`, a, a]),
+    ...[12, 13, 14, 15].map(a => [`${cursName(a)}`, a, a]),
+    ['1r de Batxillerat', 16, 16], ['2n de Batxillerat', 17, 17]
+  ];
+
   const decadeOf = b => (b.year != null ? Math.floor(b.year / 10) * 10 : null);
   const isMine = () => state.me && state.owner && state.owner.id === state.me.id;
 
-  function listBooks(list) { return state.books.filter(b => (b.list || 'shelf') === list); }
+  const sectionOf = b => b.section || 'main';
+  function listBooks(list, section) {
+    section = section || state.section;
+    return state.books.filter(b => (b.list || 'shelf') === list && sectionOf(b) === section);
+  }
 
   function visibleBooks() {
     const inList = listBooks(state.list);
+    if (state.section === 'kids') {
+      if (!state.ageFilter) return inList;
+      const [lo, hi] = state.ageFilter;
+      return inList.filter(b => { const r = ageRange(b); return r && r[0] <= hi && r[1] >= lo; });
+    }
     if (state.decade === 'all') return inList;
     return inList.filter(b => decadeOf(b) === state.decade);
   }
@@ -82,11 +169,15 @@
     return parts.join(' / ');
   }
 
-  function shelfHref(ownerId, list) {
-    const base = state.me && ownerId === state.me.id ? '#/' : `#/u/${ownerId}`;
-    if (list === 'wishlist') return base === '#/' ? '#/per-llegir' : `${base}/per-llegir`;
-    return base;
+  function shelfHref(ownerId, list, section) {
+    const parts = [];
+    if (!(state.me && ownerId === state.me.id)) parts.push('u', ownerId);
+    if ((section || 'main') === 'kids') parts.push('infantil');
+    if (list === 'wishlist') parts.push('per-llegir');
+    return '#/' + parts.join('/');
   }
+  const shelfLabel = (list, section) =>
+    list === 'wishlist' ? 'Per llegir' : (section === 'kids' ? 'Infantil' : 'Prestatgeria');
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -108,13 +199,15 @@
     $('lang').hidden = !signedIn || name === 'edit' || name === 'members';
     $('add-link').hidden = !(signedIn && name === 'shelf' && isMine());
     $('foot-right').hidden = !signedIn;
-    $('nav-mine').setAttribute('aria-current', String(name === 'shelf' && isMine()));
+    $('nav-mine').setAttribute('aria-current', String(name === 'shelf' && isMine() && state.section === 'main'));
+    $('nav-kids').setAttribute('aria-current', String(name === 'shelf' && isMine() && state.section === 'kids'));
     $('nav-all').setAttribute('aria-current', String(name === 'members'));
   }
 
   function setHeader() {
     const owner = state.owner;
-    $('brand-sub').textContent = state.me && owner ? `La prestatgeria ${deName(owner.name)}` : '';
+    const kind = state.section === 'kids' && state.view !== 'members' ? 'La prestatgeria infantil' : 'La prestatgeria';
+    $('brand-sub').textContent = state.me && owner ? `${kind} ${deName(owner.name)}` : '';
     $('foot-user').textContent = state.me ? state.me.display_name : '';
     let left = 'Larita’s Book Shelf';
     if (state.me && owner && (state.view === 'shelf' || state.view === 'book')) {
@@ -163,8 +256,50 @@
     }
   }
 
+  function renderAgeFilters(box) {
+    const inList = listBooks(state.list);
+    box.innerHTML = '';
+    box.hidden = !inList.length;
+    if (!inList.length) { state.ageFilter = null; return; }
+    box.setAttribute('aria-label', 'Filtra per edat o per curs');
+    const wrap = el('div', 'age-filters');
+    const age = document.createElement('select');
+    age.setAttribute('aria-label', 'Edat');
+    const curs = document.createElement('select');
+    curs.setAttribute('aria-label', 'Curs');
+    const opt = (sel, value, label) => { const o = document.createElement('option'); o.value = value; o.textContent = label; sel.appendChild(o); };
+    opt(age, '', 'Totes les edats');
+    for (let a = 0; a <= 18; a++) opt(age, `${a}-${a}`, anys(a));
+    opt(curs, '', 'Tots els cursos');
+    for (const [label, lo, hi] of CURS_FILTERS) opt(curs, `${lo}-${hi}`, label);
+    const f = state.ageFilter;
+    const key = f ? `${f[0]}-${f[1]}` : '';
+    if (f && state.ageFilterBy === 'curs') curs.value = key; else if (f) age.value = key;
+    age.classList.toggle('is-active', !!age.value);
+    curs.classList.toggle('is-active', !!curs.value);
+    const apply = (sel, other, by) => {
+      other.value = '';
+      state.ageFilter = sel.value ? sel.value.split('-').map(Number) : null;
+      state.ageFilterBy = by;
+      renderAgeFilters(box);
+      fillShelf();
+    };
+    age.addEventListener('change', () => apply(age, curs, 'age'));
+    curs.addEventListener('change', () => apply(curs, age, 'curs'));
+    wrap.append(age, curs);
+    if (f) {
+      const clear = el('button', 'btn-link', 'Treu el filtre');
+      clear.type = 'button';
+      clear.addEventListener('click', () => { state.ageFilter = null; renderAgeFilters(box); fillShelf(); });
+      wrap.appendChild(clear);
+    }
+    box.appendChild(wrap);
+  }
+
   function renderFilters() {
     const box = $('filters');
+    if (state.section === 'kids') { renderAgeFilters(box); return; }
+    box.setAttribute('aria-label', 'Filtra per dècada de publicació');
     const inList = listBooks(state.list);
     const decades = [...new Set(inList.map(decadeOf).filter(d => d != null))].sort((a, b) => a - b);
     box.innerHTML = '';
@@ -194,10 +329,20 @@
     const mine = isMine();
     $('empty').hidden = list.length > 0;
     $('empty-add').hidden = !mine;
-    $('empty-add').href = state.list === 'wishlist' ? '#/afegeix/per-llegir' : '#/afegeix';
-    if (state.list === 'wishlist') {
+    const kids = state.section === 'kids';
+    $('empty-add').href = '#/afegeix' + (kids ? '/infantil' : '') + (state.list === 'wishlist' ? '/per-llegir' : '');
+    $('empty-add').textContent = kids ? 'Afegeix un llibre infantil' : 'Afegeix un llibre';
+    $('add-link').href = $('empty-add').href;
+    if (kids && state.ageFilter && listBooks(state.list).length) {
+      $('empty-title').textContent = 'Cap llibre per a aquesta edat';
+      $('empty-text').textContent = 'Prova amb una altra edat o un altre curs, o treu el filtre.';
+      $('empty-add').hidden = true;
+    } else if (state.list === 'wishlist') {
       $('empty-title').textContent = mine ? 'Encara no hi ha cap llibre per llegir' : 'Aquesta llista encara és buida';
       $('empty-text').textContent = mine ? 'Desa aquí els llibres que vols llegir.' : '';
+    } else if (kids) {
+      $('empty-title').textContent = mine ? 'La prestatgeria infantil és buida' : 'Aquesta prestatgeria infantil encara és buida';
+      $('empty-text').textContent = mine ? 'Afegeix-hi contes i llibres infantils, amb l’edat recomanada de cadascun.' : '';
     } else {
       $('empty-title').textContent = mine ? 'La prestatgeria és buida' : 'Aquesta prestatgeria encara és buida';
       $('empty-text').textContent = mine ? 'Afegeix el primer llibre i apareixerà aquí, amb el llom a la vista.' : '';
@@ -232,7 +377,7 @@
     const write = () => {
       $('cap-title').textContent = T(book);
       $('cap-author').textContent = book.author || '';
-      $('cap-year').textContent = book.year ?? '';
+      $('cap-year').textContent = state.section === 'kids' ? (ageText(book) || (book.year ?? '')) : (book.year ?? '');
     };
     if (capTween) capTween.kill();
     if (reduceMotion() || !$('cap-title').textContent) { write(); gsap.set(cap, { opacity: 1 }); return; }
@@ -338,9 +483,10 @@
     const mine = state.me && book.profile_id === state.me.id;
     const owner = state.owner;
     const list = (book.list || 'shelf');
-    if (state.list !== list) { state.list = list; state.decade = 'all'; }
-    $('back').href = shelfHref(book.profile_id, list);
-    $('back-label').textContent = list === 'wishlist' ? 'Per llegir' : 'Prestatgeria';
+    const section = sectionOf(book);
+    if (state.list !== list || state.section !== section) { state.list = list; state.section = section; state.decade = 'all'; state.ageFilter = null; }
+    $('back').href = shelfHref(book.profile_id, list, section);
+    $('back-label').textContent = shelfLabel(list, section);
     setHeader();
 
     $('book-author').textContent = book.author || '';
@@ -354,6 +500,8 @@
     const paras = String(book.description || '').split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
     for (const para of paras) desc.appendChild(el('p', null, para));
     if (!paras.length) desc.appendChild(el('p', 'muted', mine ? 'Encara no hi ha sinopsi. La pots afegir a «Edita els detalls».' : 'Sense sinopsi.'));
+
+    renderAgeBox(book, mine);
 
     // Rating, actions
     $('rating').hidden = list === 'wishlist' && !book.rating;
@@ -397,6 +545,21 @@
       gsap.fromTo('.book-head > *', { y: 14, opacity: 0 },
         { y: 0, opacity: 1, duration: 0.55, stagger: 0.05, ease: 'power2.out', delay: 0.1 });
     }
+  }
+
+  function renderAgeBox(book, mine) {
+    const box = $('agebox');
+    const kids = sectionOf(book) === 'kids';
+    const has = book.age_min != null || book.age_max != null;
+    box.hidden = !kids || (!has && !mine);
+    if (box.hidden) return;
+    $('age-form').hidden = true;
+    $('age-view').hidden = false;
+    $('age-text').textContent = has ? ageText(book) : 'Sense edat recomanada';
+    $('age-text').classList.toggle('muted', !has);
+    $('curs-text').textContent = cursText(book);
+    $('age-open').hidden = !mine;
+    $('age-open').textContent = has ? 'Canvia l’edat' : 'Afegeix l’edat';
   }
 
   function renderReview(book, mine) {
@@ -486,6 +649,25 @@
   }
 
   function bindBookPage() {
+    pairAges($('age-from'), $('age-to'));
+    pairAges($('f-age-from'), $('f-age-to'));
+    $('age-open').addEventListener('click', () => {
+      fillAgeSelect($('age-from'), state.book.age_min, '—');
+      fillAgeSelect($('age-to'), state.book.age_max, '—');
+      $('age-view').hidden = true;
+      $('age-form').hidden = false;
+      $('age-from').focus();
+    });
+    $('age-cancel').addEventListener('click', () => renderAgeBox(state.book, true));
+    $('age-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        const saved = await DB.updateBook(state.book.id, { age_min: readAge($('age-from')), age_max: readAge($('age-to')) });
+        replaceBook(saved);
+        renderAgeBox(saved, true);
+        toast('Edat desada');
+      } catch (err) { toast(err.message); }
+    });
     $('review-open').addEventListener('click', () => {
       $('review-input').value = state.book.review || '';
       $('review-form').hidden = false;
@@ -547,7 +729,7 @@
 
   function removeBook(book) {
     const dlg = $('confirm');
-    const where = (book.list || 'shelf') === 'wishlist' ? 'de la llista Per llegir' : 'de la prestatgeria';
+    const where = (book.list || 'shelf') === 'wishlist' ? 'de la llista Per llegir' : (sectionOf(book) === 'kids' ? 'de la prestatgeria infantil' : 'de la prestatgeria');
     $('confirm-title').textContent = 'Vols treure aquest llibre?';
     $('confirm-text').textContent = `«${T(book)}» sortirà ${where}, amb les seves cites i comentaris. No es pot desfer.`;
     dlg.returnValue = '';
@@ -558,7 +740,7 @@
         await DB.removeBook(book.id);
         storeBooks(book.profile_id, (state.cache.get(book.profile_id) || []).filter(b => b.id !== book.id));
         toast('Llibre tret');
-        location.hash = shelfHref(book.profile_id, book.list || 'shelf');
+        location.hash = shelfHref(book.profile_id, book.list || 'shelf', sectionOf(book));
       } catch (e) { toast(e.message); }
     }, { once: true });
   }
@@ -579,7 +761,7 @@
   function emptyDraft(list) {
     return { title: '', title_en: '', author: '', year: null, pages: null, genre: '', description: '',
       cover_url: null, cover_data: null, cover_aspect: 0.66, spine_color: null, cover_tone: null,
-      isbn: null, source: null, list: list || 'shelf' };
+      isbn: null, source: null, list: list || 'shelf', section: state.newSection || 'main', age_min: null, age_max: null };
   }
 
   function setTitleLang(lang) {
@@ -593,10 +775,20 @@
       : `Pots posar-hi també el títol en ${otherName}: tria la llengua per escriure’l.`;
   }
 
+  function setDraftSection(section) {
+    state.draft.section = section;
+    for (const b of document.querySelectorAll('#f-section button')) b.setAttribute('aria-pressed', String(b.dataset.section === section));
+    $('age-field').hidden = section !== 'kids';
+    if (!state.editingId) setDraftList(state.draft.list || 'shelf');
+  }
+
   function setDraftList(list) {
     state.draft.list = list;
     for (const b of document.querySelectorAll('#f-list button')) b.setAttribute('aria-pressed', String(b.dataset.list === list));
-    if (!state.editingId) $('book-save').textContent = list === 'wishlist' ? 'Afegeix a Per llegir' : 'Afegeix a la prestatgeria';
+    if (!state.editingId) {
+      $('book-save').textContent = list === 'wishlist' ? 'Afegeix a Per llegir'
+        : (state.draft.section === 'kids' ? 'Afegeix a la prestatgeria infantil' : 'Afegeix a la prestatgeria');
+    }
   }
 
   function renderSwatches() {
@@ -647,6 +839,9 @@
     $('book-error').textContent = '';
     setTitleLang(d.title || !d.title_en ? 'ca' : 'en');
     setDraftList(d.list || 'shelf');
+    setDraftSection(d.section || 'main');
+    fillAgeSelect($('f-age-from'), d.age_min, 'Sense indicar');
+    fillAgeSelect($('f-age-to'), d.age_max, 'Sense indicar');
     renderSwatches();
   }
 
@@ -656,7 +851,7 @@
     renderPreview(animate);
   }
 
-  function openEditView(id, list) {
+  function openEditView(id, list, section) {
     state.searchSeq++;
     $('results').innerHTML = '';
     $('search-status').textContent = '';
@@ -680,10 +875,12 @@
       state.editingId = null;
       state.draft = null;
       state.newList = list || 'shelf';
-      $('edit-title').textContent = list === 'wishlist' ? 'Afegeix a Per llegir' : 'Afegeix un llibre';
-      $('book-cancel').href = list === 'wishlist' ? '#/per-llegir' : '#/';
+      state.newSection = section || 'main';
+      $('edit-title').textContent = list === 'wishlist' ? 'Afegeix a Per llegir'
+        : (section === 'kids' ? 'Afegeix un llibre infantil' : 'Afegeix un llibre');
+      $('book-cancel').href = shelfHref(state.me.id, list, section);
       $('back').href = $('book-cancel').href;
-      $('back-label').textContent = list === 'wishlist' ? 'Per llegir' : 'Prestatgeria';
+      $('back-label').textContent = shelfLabel(list, section);
       $('search-form').hidden = false;
       $('list-field').hidden = false;
       $('book-form').hidden = true;
@@ -931,6 +1128,10 @@
     d.pages = num($('f-pages').value);
     d.genre = $('f-genre').value.trim() || null;
     d.description = $('f-desc').value.trim() || null;
+    if (d.section === 'kids') {
+      d.age_min = readAge($('f-age-from'));
+      d.age_max = readAge($('f-age-to'));
+    }
   }
 
   function validate(d) {
@@ -951,12 +1152,14 @@
       $(problem[0] === 'f-title' && state.titleLang === 'en' ? 'f-title-en' : problem[0]).focus();
       return;
     }
-    const fields = ['title', 'title_en', 'author', 'year', 'pages', 'genre', 'description', 'cover_url', 'cover_data', 'cover_aspect', 'spine_color', 'isbn', 'source', 'list'];
+    const fields = ['title', 'title_en', 'author', 'year', 'pages', 'genre', 'description', 'cover_url', 'cover_data', 'cover_aspect', 'spine_color', 'isbn', 'source', 'list', 'section', 'age_min', 'age_max'];
     const payload = {};
     for (const f of fields) payload[f] = d[f] === '' ? null : (d[f] ?? null);
     payload.cover_aspect = payload.cover_aspect || 0.66;
     payload.spine_color = payload.spine_color || d.cover_tone || Books.hashSwatch(d.title_en || d.title).hex;
     payload.list = payload.list || 'shelf';
+    payload.section = payload.section || 'main';
+    if (payload.section !== 'kids') { payload.age_min = null; payload.age_max = null; }
     const btn = $('book-save');
     btn.disabled = true;
     try {
@@ -971,10 +1174,12 @@
         const saved = await DB.addBook(payload);
         storeBooks(state.me.id, [...mine, saved]);
         state.list = saved.list;
+        state.section = sectionOf(saved);
         state.decade = 'all';
+        state.ageFilter = null;
         state.pendingFocus = saved.id;
-        toast(saved.list === 'wishlist' ? 'Afegit a Per llegir' : 'Afegit a la prestatgeria');
-        location.hash = shelfHref(state.me.id, saved.list);
+        toast(saved.list === 'wishlist' ? 'Afegit a Per llegir' : (state.section === 'kids' ? 'Afegit a la prestatgeria infantil' : 'Afegit a la prestatgeria'));
+        location.hash = shelfHref(state.me.id, saved.list, state.section);
       }
     } catch (err) {
       $('book-error').textContent = err.message;
@@ -1009,6 +1214,7 @@
       });
     }
     for (const b of document.querySelectorAll('#f-list button')) b.addEventListener('click', () => setDraftList(b.dataset.list));
+    for (const b of document.querySelectorAll('#f-section button')) b.addEventListener('click', () => setDraftSection(b.dataset.section));
     for (const id of ['f-title', 'f-title-en', 'f-author', 'f-year', 'f-pages']) {
       $(id).addEventListener('input', () => {
         if (!state.draft) return;
@@ -1069,6 +1275,11 @@
           `${plural(Number(s.read_count), 'llegit', 'llegits')} · ${Number(s.wish_count)} per llegir`);
         a.append(spines, name, counts);
         li.appendChild(a);
+        const kids = Number(s.kids_count) || 0;
+        const k = el('a', 'member-kids', `Infantil · ${plural(kids, 'llibre', 'llibres')} →`);
+        k.href = shelfHref(s.id, 'shelf', 'kids');
+        k.setAttribute('aria-label', `Prestatgeria infantil ${deName(s.display_name)}, ${plural(kids, 'llibre', 'llibres')}`);
+        li.appendChild(k);
         ul.appendChild(li);
       }
     } catch (e) {
@@ -1145,18 +1356,20 @@
 
   // --------------------------------------------------------------- router
 
-  async function showShelf(ownerId, list) {
-    const changed = !state.owner || state.owner.id !== ownerId || state.list !== list;
-    if (changed && state.list !== list) state.decade = 'all';
+  async function showShelf(ownerId, list, section) {
+    section = section || 'main';
+    const changed = !state.owner || state.owner.id !== ownerId || state.list !== list || state.section !== section;
+    if (changed && (state.list !== list || state.section !== section)) { state.decade = 'all'; state.ageFilter = null; }
     state.list = list;
+    state.section = section;
     await loadOwner(ownerId);
     show('shelf');
-    const key = `${ownerId}:${list}:${window.SHELF_LANG}`;
+    const key = `${ownerId}:${section}:${list}:${window.SHELF_LANG}`;
     const focus = state.pendingFocus;
     state.pendingFocus = null;
     if (key !== state.shelfKey || focus) {
       state.shelfKey = key;
-      state.decade = changed ? 'all' : state.decade;
+      if (changed) { state.decade = 'all'; state.ageFilter = null; }
       refreshShelf(focus);
     } else {
       renderTabs();
@@ -1183,7 +1396,7 @@
       } else if (page === 'afegeix') {
         await loadOwner(state.me.id);
         show('edit');
-        openEditView(null, a === 'per-llegir' ? 'wishlist' : 'shelf');
+        openEditView(null, parts.includes('per-llegir') ? 'wishlist' : 'shelf', parts.includes('infantil') ? 'kids' : 'main');
       } else if (page === 'edita' && a) {
         await loadOwner(state.me.id);
         show('edit');
@@ -1194,8 +1407,12 @@
         setHeader();
         renderMembers();
       } else if (page === 'u' && a) {
-        if (a === state.me.id) { location.replace(b === 'per-llegir' ? '#/per-llegir' : '#/'); return; }
-        await showShelf(a, b === 'per-llegir' ? 'wishlist' : 'shelf');
+        const list = parts.includes('per-llegir') ? 'wishlist' : 'shelf';
+        const section = parts.includes('infantil') ? 'kids' : 'main';
+        if (a === state.me.id) { location.replace(shelfHref(a, list, section)); return; }
+        await showShelf(a, list, section);
+      } else if (page === 'infantil') {
+        await showShelf(state.me.id, parts.includes('per-llegir') ? 'wishlist' : 'shelf', 'kids');
       } else if (page === 'per-llegir') {
         await showShelf(state.me.id, 'wishlist');
       } else {
@@ -1216,7 +1433,7 @@
     for (const b of document.querySelectorAll('#list-tabs button')) {
       b.addEventListener('click', () => {
         if (!state.owner || b.dataset.list === state.list) return;
-        location.hash = shelfHref(state.owner.id, b.dataset.list);
+        location.hash = shelfHref(state.owner.id, b.dataset.list, state.section);
       });
     }
     for (const b of document.querySelectorAll('#lang button')) b.addEventListener('click', () => setLang(b.dataset.lang));
