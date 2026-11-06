@@ -11,20 +11,20 @@
     auth: { persistSession: true, autoRefreshToken: true, storageKey: 'larita-shelf-auth' }
   });
 
-  const COLS = 'id,title,author,year,pages,genre,description,cover_url,cover_data,cover_aspect,spine_color,isbn,source,created_at';
+  const COLS = 'id,profile_id,title,title_en,author,year,pages,genre,description,cover_url,cover_data,cover_aspect,spine_color,isbn,source,list,rating,review,created_at';
 
   // Friendly messages for problems people can act on.
   function explain(error) {
     const msg = String((error && (error.message || error.error_description)) || error || '');
     if (/anonymous sign-ins are disabled/i.test(msg)) {
-      return 'Sign-in isn’t switched on yet: anonymous sign-ins need to be enabled in Supabase.';
+      return 'L’entrada encara no està activada: cal permetre els inicis de sessió anònims a Supabase.';
     }
-    if (/could not find the function|schema cache|relation .* does not exist|PGRST20/i.test(msg)) {
-      return 'The database isn’t set up yet: run supabase/setup.sql in Supabase.';
+    if (/could not find the function|schema cache|relation .* does not exist|column .* does not exist|PGRST20/i.test(msg)) {
+      return 'La base de dades no està al dia: cal executar supabase/setup.sql a Supabase.';
     }
-    if (/failed to fetch|network/i.test(msg)) return 'Can’t reach the server. Check your connection and try again.';
-    if (/rate limit/i.test(msg)) return 'Too many attempts from this connection. Wait a little and try again.';
-    return 'Something went wrong. Please try again.';
+    if (/failed to fetch|network/i.test(msg)) return 'No es pot connectar amb el servidor. Comprova la connexió i torna-ho a provar.';
+    if (/rate limit/i.test(msg)) return 'Massa intents des d’aquesta connexió. Espera una mica i torna-ho a provar.';
+    return 'Alguna cosa no ha funcionat. Torna-ho a provar.';
   }
 
   function fail(error) {
@@ -70,18 +70,66 @@
 
     signIn: (username, password) => rpc('sign_in', { p_username: username, p_password: password }),
 
-    signUp: (username, displayName, password) =>
-      rpc('sign_up', { p_username: username, p_display_name: displayName, p_password: password }),
+    signUp: (username, password) => rpc('sign_up', { p_username: username, p_password: password }),
 
     async signOut() {
       try { await client.rpc('sign_out'); } catch (_) { /* signing out anyway */ }
       await client.auth.signOut().catch(() => {});
     },
 
-    async listBooks() {
-      const res = await client.from('books').select(COLS).order('created_at', { ascending: true });
+    async listBooks(profileId) {
+      const res = await client.from('books').select(COLS).eq('profile_id', profileId).order('created_at', { ascending: true });
       if (res.error) fail(res.error);
       return res.data;
+    },
+
+    async getBook(id) {
+      const res = await client.from('books').select(COLS).eq('id', id).maybeSingle();
+      if (res.error) fail(res.error);
+      return res.data;
+    },
+
+    async listShelves() {
+      const res = await client.rpc('list_shelves');
+      if (res.error) fail(res.error);
+      return res.data || [];
+    },
+
+    async listQuotes(bookId) {
+      const res = await client.from('quotes').select('id,book_id,body,page,created_at').eq('book_id', bookId).order('created_at');
+      if (res.error) fail(res.error);
+      return res.data;
+    },
+
+    async addQuote(bookId, body, page) {
+      const res = await client.from('quotes').insert({ book_id: bookId, body, page: page || null }).select('id,book_id,body,page,created_at').single();
+      if (res.error) fail(res.error);
+      return res.data;
+    },
+
+    async removeQuote(id) {
+      const res = await client.from('quotes').delete().eq('id', id);
+      if (res.error) fail(res.error);
+    },
+
+    async listComments(bookId) {
+      const res = await client.from('comments')
+        .select('id,book_id,author_id,body,created_at,author:profiles(display_name)')
+        .eq('book_id', bookId).order('created_at');
+      if (res.error) fail(res.error);
+      return res.data;
+    },
+
+    async addComment(bookId, body) {
+      const res = await client.from('comments').insert({ book_id: bookId, body })
+        .select('id,book_id,author_id,body,created_at,author:profiles(display_name)').single();
+      if (res.error) fail(res.error);
+      return res.data;
+    },
+
+    async removeComment(id) {
+      const res = await client.from('comments').delete().eq('id', id);
+      if (res.error) fail(res.error);
     },
 
     async addBook(book) {

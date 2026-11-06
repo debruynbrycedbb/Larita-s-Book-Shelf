@@ -1,11 +1,14 @@
-/* Larita's Book Shelf — pages and flow.
+/* Larita's Book Shelf — pages and flow (interface in Catalan).
  *
  * Routes (in the address after #):
- *   #/              the shelf
- *   #/book/<id>     one book
- *   #/add           add a book
- *   #/edit/<id>     edit a book
- *   #/signin        sign in or create a shelf
+ *   #/                    my shelf (books I've read)
+ *   #/per-llegir          my wishlist
+ *   #/u/<id>              someone else's shelf      (#/u/<id>/per-llegir)
+ *   #/llibre/<id>         one book
+ *   #/afegeix             add a book                (#/afegeix/per-llegir)
+ *   #/edita/<id>          edit a book
+ *   #/prestatgeries       everyone's shelves
+ *   #/entra               sign in or create a shelf
  */
 (function () {
   'use strict';
@@ -13,17 +16,29 @@
   const $ = id => document.getElementById(id);
   const app = $('app');
   const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const T = b => Books.titleOf(b);
+  const dateFmt = new Intl.DateTimeFormat('ca', { day: 'numeric', month: 'long', year: 'numeric' });
 
   const state = {
     me: null,
-    books: [],       // sorted
+    owner: null,        // { id, name } of the shelf being viewed
+    list: 'shelf',      // 'shelf' | 'wishlist'
     decade: 'all',
+    cache: new Map(),   // profile id → books
+    books: [],          // books of the shelf being viewed (both lists)
+    shelfKey: '',
     shelf: null,
     view: 'loading',
-    draft: null,     // book being added / edited
+    draft: null,
     editingId: null,
-    searchSeq: 0
+    searchSeq: 0,
+    titleLang: 'ca',
+    book: null          // book on the book page
   };
+
+  // Title language for the whole site, remembered in this browser.
+  try { window.SHELF_LANG = localStorage.getItem('shelf-lang') === 'en' ? 'en' : 'ca'; }
+  catch (_) { window.SHELF_LANG = 'ca'; }
 
   // ---------------------------------------------------------------- utils
 
@@ -35,30 +50,49 @@
     toast.timer = setTimeout(() => t.classList.remove('show'), 2600);
   }
 
-  // Shelf order: by year published, then title. Books without a year go last.
   function sortBooks(list) {
     return list.slice().sort((a, b) => {
       const ay = a.year ?? 99999, by = b.year ?? 99999;
       if (ay !== by) return ay - by;
-      return String(a.title).localeCompare(String(b.title));
+      return T(a).localeCompare(T(b), 'ca');
     });
   }
 
-  function decadeOf(b) { return b.year != null ? Math.floor(b.year / 10) * 10 : null; }
+  const decadeOf = b => (b.year != null ? Math.floor(b.year / 10) * 10 : null);
+  const isMine = () => state.me && state.owner && state.owner.id === state.me.id;
+
+  function listBooks(list) { return state.books.filter(b => (b.list || 'shelf') === list); }
 
   function visibleBooks() {
-    if (state.decade === 'all') return state.books;
-    return state.books.filter(b => decadeOf(b) === state.decade);
+    const inList = listBooks(state.list);
+    if (state.decade === 'all') return inList;
+    return inList.filter(b => decadeOf(b) === state.decade);
   }
 
-  function possessive(name) { return /s$/i.test(name) ? `${name}’` : `${name}’s`; }
+  // "de Lara" / "d’Anna"
+  function deName(name) { return /^[aeiouàèéíòóúh]/i.test(name) ? `d’${name}` : `de ${name}`; }
+
+  function plural(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
 
   function metaLine(b) {
     const parts = [];
     if (b.year != null) parts.push(b.year);
     if (b.genre) parts.push(b.genre);
-    if (b.pages) parts.push(`${b.pages} pages`);
+    if (b.pages) parts.push(`${b.pages} pàgines`);
     return parts.join(' / ');
+  }
+
+  function shelfHref(ownerId, list) {
+    const base = state.me && ownerId === state.me.id ? '#/' : `#/u/${ownerId}`;
+    if (list === 'wishlist') return base === '#/' ? '#/per-llegir' : `${base}/per-llegir`;
+    return base;
+  }
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
   }
 
   // ---------------------------------------------------------------- views
@@ -68,37 +102,80 @@
     app.dataset.view = name;
     for (const v of document.querySelectorAll('.view')) v.hidden = v.dataset.name !== name;
     const signedIn = !!state.me;
-    $('back').hidden = !(name === 'book' || name === 'edit');
-    $('add-link').hidden = !(signedIn && name === 'shelf');
+    const sub = name === 'book' || name === 'edit';
+    $('back').hidden = !sub;
+    $('topnav').hidden = !signedIn || sub;
+    $('lang').hidden = !signedIn || name === 'edit' || name === 'members';
+    $('add-link').hidden = !(signedIn && name === 'shelf' && isMine());
     $('foot-right').hidden = !signedIn;
+    $('nav-mine').setAttribute('aria-current', String(name === 'shelf' && isMine()));
+    $('nav-all').setAttribute('aria-current', String(name === 'members'));
   }
 
   function setHeader() {
-    $('brand-sub').textContent = state.me ? `${possessive(state.me.display_name)} shelf` : '';
+    const owner = state.owner;
+    $('brand-sub').textContent = state.me && owner ? `La prestatgeria ${deName(owner.name)}` : '';
     $('foot-user').textContent = state.me ? state.me.display_name : '';
-    const n = state.books.length;
-    const years = state.books.map(b => b.year).filter(y => y != null);
     let left = 'Larita’s Book Shelf';
-    if (state.me) {
-      left = n === 1 ? '1 book' : `${n} books`;
+    if (state.me && owner && (state.view === 'shelf' || state.view === 'book')) {
+      const list = listBooks(state.list);
+      left = plural(list.length, 'llibre', 'llibres');
+      const years = list.map(b => b.year).filter(y => y != null);
       if (years.length > 1) left += ` · ${Math.min(...years)}–${Math.max(...years)}`;
     }
     $('foot-left').textContent = left;
+    $('count-shelf').textContent = listBooks('shelf').length || '';
+    $('count-wishlist').textContent = listBooks('wishlist').length || '';
+    for (const b of document.querySelectorAll('#lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === window.SHELF_LANG));
+  }
+
+  // -------------------------------------------------------------- loading
+
+  async function loadOwner(ownerId) {
+    if (state.owner && state.owner.id === ownerId && state.cache.has(ownerId)) {
+      state.books = state.cache.get(ownerId);
+      return;
+    }
+    let name = state.me.display_name;
+    if (ownerId !== state.me.id) {
+      const shelves = await DB.listShelves();
+      const s = shelves.find(x => x.id === ownerId);
+      if (!s) throw new Error('Aquesta prestatgeria no existeix.');
+      name = s.display_name;
+    }
+    if (!state.cache.has(ownerId)) state.cache.set(ownerId, sortBooks(await DB.listBooks(ownerId)));
+    state.owner = { id: ownerId, name };
+    state.books = state.cache.get(ownerId);
+  }
+
+  function storeBooks(ownerId, books) {
+    const sorted = sortBooks(books);
+    state.cache.set(ownerId, sorted);
+    state.shelfKey = ''; // shelf needs rebuilding next time it's shown
+    if (state.owner && state.owner.id === ownerId) state.books = sorted;
   }
 
   // ---------------------------------------------------------------- shelf
 
+  function renderTabs() {
+    for (const b of document.querySelectorAll('#list-tabs button')) {
+      b.setAttribute('aria-pressed', String(b.dataset.list === state.list));
+    }
+  }
+
   function renderFilters() {
     const box = $('filters');
-    const decades = [...new Set(state.books.map(decadeOf).filter(d => d != null))].sort((a, b) => a - b);
+    const inList = listBooks(state.list);
+    const decades = [...new Set(inList.map(decadeOf).filter(d => d != null))].sort((a, b) => a - b);
     box.innerHTML = '';
     if (decades.length < 2) { box.hidden = true; state.decade = 'all'; return; }
     box.hidden = false;
     if (state.decade !== 'all' && !decades.includes(state.decade)) state.decade = 'all';
-    const add = (value, label) => {
+    const add = (value, label, aria) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = label;
+      if (aria) b.setAttribute('aria-label', aria);
       b.setAttribute('aria-pressed', String(state.decade === value));
       b.addEventListener('click', () => {
         if (state.decade === value) return;
@@ -108,34 +185,52 @@
       });
       box.appendChild(b);
     };
-    add('all', 'All');
-    for (const d of decades) add(d, d < 0 ? `${d}` : `${d}s`);
+    add('all', 'Tots');
+    for (const d of decades) add(d, `${d}–${String(d + 9).slice(-2)}`, `De ${d} a ${d + 9}`);
   }
 
   function fillShelf(focusId) {
     const list = visibleBooks();
+    const mine = isMine();
     $('empty').hidden = list.length > 0;
+    $('empty-add').hidden = !mine;
+    $('empty-add').href = state.list === 'wishlist' ? '#/afegeix/per-llegir' : '#/afegeix';
+    if (state.list === 'wishlist') {
+      $('empty-title').textContent = mine ? 'Encara no hi ha cap llibre per llegir' : 'Aquesta llista encara és buida';
+      $('empty-text').textContent = mine ? 'Desa aquí els llibres que vols llegir.' : '';
+    } else {
+      $('empty-title').textContent = mine ? 'La prestatgeria és buida' : 'Aquesta prestatgeria encara és buida';
+      $('empty-text').textContent = mine ? 'Afegeix el primer llibre i apareixerà aquí, amb el llom a la vista.' : '';
+    }
     $('prev').hidden = $('next').hidden = list.length < 2;
     $('caption').hidden = !list.length;
+    if (!list.length) $('cap-title').textContent = '';
     state.shelf.setBooks(list, focusId);
     const ol = $('book-list');
     ol.innerHTML = '';
     for (const b of list) {
       const li = document.createElement('li');
       const a = document.createElement('a');
-      a.href = `#/book/${b.id}`;
-      a.textContent = [b.title, b.author && `by ${b.author}`, b.year].filter(Boolean).join(', ');
+      a.href = `#/llibre/${b.id}`;
+      a.textContent = [T(b), b.author && `de ${b.author}`, b.year].filter(Boolean).join(', ');
       li.appendChild(a);
       ol.appendChild(li);
     }
+    setHeader();
+  }
+
+  function refreshShelf(focusId) {
+    renderTabs();
+    renderFilters();
+    fillShelf(focusId);
   }
 
   let capTween = null;
   function onFocus(book, i, n) {
-    $('live').textContent = `${book.title}${book.author ? ', ' + book.author : ''}. ${i + 1} of ${n}.`;
+    $('live').textContent = `${T(book)}${book.author ? ', ' + book.author : ''}. ${i + 1} de ${n}.`;
     const cap = $('caption');
     const write = () => {
-      $('cap-title').textContent = book.title;
+      $('cap-title').textContent = T(book);
       $('cap-author').textContent = book.author || '';
       $('cap-year').textContent = book.year ?? '';
     };
@@ -147,119 +242,380 @@
       .to(cap, { opacity: 1, duration: 0.22, ease: 'power1.out' });
   }
 
-  function openBook(book) { location.hash = `#/book/${book.id}`; }
+  function openBook(book) { location.hash = `#/llibre/${book.id}`; }
+
+  function setLang(lang) {
+    if (lang === window.SHELF_LANG) return;
+    window.SHELF_LANG = lang;
+    try { localStorage.setItem('shelf-lang', lang); } catch (_) { /* fine */ }
+    const current = state.shelf.currentBook();
+    for (const [id, books] of state.cache) state.cache.set(id, sortBooks(books));
+    if (state.owner) state.books = state.cache.get(state.owner.id) || state.books;
+    if (state.view === 'shelf') { refreshShelf(current && current.id); }
+    else if (state.view === 'book' && state.book) { renderBookPage(state.book.id); }
+    setHeader();
+  }
+
+  // ------------------------------------------------------------- one book
 
   // A single large book, centred in `box`, with a soft shadow beneath.
   function figure(box, book, H) {
     const { root, dims } = Books.build(book, { H, eager: true });
-    const holder = document.createElement('div');
-    holder.className = 'figure-book';
+    const holder = el('div', 'figure-book');
     holder.appendChild(root);
-    const shadow = document.createElement('div');
-    shadow.className = 'figure-shadow';
+    const shadow = el('div', 'figure-shadow');
     shadow.style.width = dims.W * 1.25 + 'px';
     shadow.style.top = `calc(50% + ${H / 2 - 14}px)`;
     box.append(shadow, holder);
     return root;
   }
 
-  // ----------------------------------------------------------- book page
+  const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-5.9 3.3 1.3-6.6-4.9-4.6 6.7-.8z"/></svg>';
 
-  function renderBookPage(id) {
-    const list = visibleBooks().length ? visibleBooks() : state.books;
-    const i = list.findIndex(b => b.id === id);
-    const book = i >= 0 ? list[i] : state.books.find(b => b.id === id);
-    if (!book) { location.hash = '#/'; return; }
+  function renderStars(book, editable) {
+    const box = $('stars');
+    box.innerHTML = '';
+    box.classList.toggle('is-editable', editable);
+    const r = book.rating || 0;
+    const score = el('span', 'score', r ? `${r}/10` : (editable ? 'Sense valorar' : 'Sense valoració'));
+    if (editable) {
+      box.setAttribute('role', 'radiogroup');
+      box.setAttribute('aria-label', 'Valoració de 10');
+    } else {
+      box.removeAttribute('role');
+      box.setAttribute('aria-label', r ? `Valoració: ${r} de 10` : 'Sense valoració');
+    }
+    const stars = el('span', 'star-row');
+    for (let i = 1; i <= 10; i++) {
+      let s;
+      if (editable) {
+        s = el('button', 'star');
+        s.type = 'button';
+        s.setAttribute('role', 'radio');
+        s.setAttribute('aria-checked', String(i === r));
+        s.setAttribute('aria-label', `${i} de 10`);
+        s.addEventListener('click', () => saveRating(book, i === r ? null : i));
+        s.addEventListener('mouseenter', () => paint(i));
+        s.addEventListener('focus', () => paint(i));
+      } else {
+        s = el('span', 'star');
+        s.setAttribute('aria-hidden', 'true');
+      }
+      s.innerHTML = STAR;
+      s.classList.toggle('on', i <= r);
+      stars.appendChild(s);
+    }
+    function paint(n) { [...stars.children].forEach((s, j) => s.classList.toggle('preview', j < n)); }
+    stars.addEventListener('mouseleave', () => paint(0));
+    stars.addEventListener('focusout', () => paint(0));
+    box.append(stars, score);
+  }
+
+  async function saveRating(book, value) {
+    try {
+      const saved = await DB.updateBook(book.id, { rating: value });
+      replaceBook(saved);
+      renderStars(saved, true);
+      toast(value ? 'Valoració desada' : 'Valoració esborrada');
+    } catch (e) { toast(e.message); }
+  }
+
+  function replaceBook(saved) {
+    const books = (state.cache.get(saved.profile_id) || []).map(b => (b.id === saved.id ? saved : b));
+    storeBooks(saved.profile_id, books);
+    if (state.book && state.book.id === saved.id) state.book = saved;
+  }
+
+  async function renderBookPage(id) {
+    let book = state.books.find(b => b.id === id);
+    if (!book) {
+      try { book = await DB.getBook(id); } catch (e) { toast(e.message); }
+      if (!book) { location.hash = '#/'; return; }
+      await loadOwner(book.profile_id);
+      book = state.books.find(b => b.id === id) || book;
+    }
+    state.book = book;
+    const mine = state.me && book.profile_id === state.me.id;
+    const owner = state.owner;
+    const list = (book.list || 'shelf');
+    if (state.list !== list) { state.list = list; state.decade = 'all'; }
+    $('back').href = shelfHref(book.profile_id, list);
+    $('back-label').textContent = list === 'wishlist' ? 'Per llegir' : 'Prestatgeria';
+    setHeader();
 
     $('book-author').textContent = book.author || '';
-    $('book-title').textContent = book.title;
+    $('book-title').textContent = T(book);
+    const other = Books.titleOf(book, window.SHELF_LANG === 'en' ? 'ca' : 'en');
+    $('book-other-title').textContent = other && other !== T(book) ? other : '';
     $('book-meta').textContent = metaLine(book);
+
     const desc = $('book-desc');
     desc.innerHTML = '';
-    for (const para of String(book.description || '').split(/\n{2,}/).map(s => s.trim()).filter(Boolean)) {
-      const p = document.createElement('p');
-      p.textContent = para;
-      desc.appendChild(p);
-    }
-    $('book-by').textContent = book.author ? `Written by ${book.author}.` : '';
-    $('book-edit').href = `#/edit/${book.id}`;
+    const paras = String(book.description || '').split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
+    for (const para of paras) desc.appendChild(el('p', null, para));
+    if (!paras.length) desc.appendChild(el('p', 'muted', mine ? 'Encara no hi ha sinopsi. La pots afegir a «Edita els detalls».' : 'Sense sinopsi.'));
+
+    // Rating, actions
+    $('rating').hidden = list === 'wishlist' && !book.rating;
+    renderStars(book, mine);
+    $('book-actions').hidden = !mine;
+    $('book-read').hidden = !(mine && list === 'wishlist');
+    $('book-read').onclick = () => markRead(book);
+    $('book-edit').href = `#/edita/${book.id}`;
+    $('book-remove').textContent = list === 'wishlist' ? 'Treu de la llista' : 'Treu de la prestatgeria';
     $('book-remove').onclick = () => removeBook(book);
 
-    const prev = i >= 0 && list.length > 1 ? list[(i - 1 + list.length) % list.length] : null;
-    const next = i >= 0 && list.length > 1 ? list[(i + 1) % list.length] : null;
-    for (const [el, b] of [[$('book-prev'), prev], [$('book-next'), next]]) {
-      el.hidden = !b;
-      if (b) { el.href = `#/book/${b.id}`; el.querySelector('span').textContent = b.title; }
+    // Review
+    $('review-label').textContent = mine ? 'La meva ressenya' : `Ressenya ${deName(owner ? owner.name : '')}`;
+    renderReview(book, mine);
+
+    // Quotes and comments
+    $('quote-form').hidden = !mine;
+    $('quotes').innerHTML = '';
+    $('comments').innerHTML = '';
+    loadExtras(book);
+
+    // Prev / next within the same list
+    const siblings = listBooks(list);
+    const i = siblings.findIndex(b => b.id === book.id);
+    const prev = i >= 0 && siblings.length > 1 ? siblings[(i - 1 + siblings.length) % siblings.length] : null;
+    const next = i >= 0 && siblings.length > 1 ? siblings[(i + 1) % siblings.length] : null;
+    for (const [a, b] of [[$('book-prev'), prev], [$('book-next'), next]]) {
+      a.hidden = !b;
+      if (b) { a.href = `#/llibre/${b.id}`; a.querySelector('span').textContent = T(b); }
     }
 
     const fig = $('book-figure');
     fig.innerHTML = '';
-    const H = Math.round(Math.min(fig.clientHeight || 560, window.innerHeight * 0.66, 620));
+    const H = Math.round(Math.min(fig.clientHeight || 520, window.innerHeight * 0.6, 580));
     const root = figure(fig, book, Math.max(240, H));
-
-    // The book turns from its spine to its cover, as if pulled from the shelf.
     if (reduceMotion()) {
       gsap.set(root, { rotationY: 20 });
     } else {
       gsap.fromTo(root, { rotationY: 90, x: -40, opacity: 0.4 },
         { rotationY: 20, x: 0, opacity: 1, duration: 0.95, ease: 'power3.out' });
-      gsap.fromTo('.book-text > *', { y: 14, opacity: 0 },
+      gsap.fromTo('.book-head > *', { y: 14, opacity: 0 },
         { y: 0, opacity: 1, duration: 0.55, stagger: 0.05, ease: 'power2.out', delay: 0.1 });
     }
-    state.shelf.goToId(book.id); // so going back lands on this book
   }
 
-  async function removeBook(book) {
+  function renderReview(book, mine) {
+    const text = $('review-text');
+    text.innerHTML = '';
+    const paras = String(book.review || '').split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
+    for (const p of paras) text.appendChild(el('p', null, p));
+    if (!paras.length && !mine) text.appendChild(el('p', 'muted', 'Encara no hi ha ressenya.'));
+    $('review-form').hidden = true;
+    $('review-open').hidden = !mine;
+    $('review-open').textContent = paras.length ? 'Edita la ressenya' : 'Escriu una ressenya';
+  }
+
+  async function loadExtras(book) {
+    const id = book.id;
+    try {
+      const [quotes, comments] = await Promise.all([DB.listQuotes(id), DB.listComments(id)]);
+      if (!state.book || state.book.id !== id) return;
+      renderQuotes(book, quotes);
+      renderComments(book, comments);
+    } catch (e) {
+      $('quotes').innerHTML = '';
+      $('quotes').appendChild(el('li', 'muted', e.message));
+    }
+  }
+
+  function renderQuotes(book, quotes) {
+    const ul = $('quotes');
+    ul.innerHTML = '';
+    const mine = state.me && book.profile_id === state.me.id;
+    ul.dataset.items = quotes.length;
+    if (!quotes.length) {
+      ul.appendChild(el('li', 'muted empty-note', mine ? 'Encara no hi ha cites. Afegeix-hi la primera.' : 'Encara no hi ha cites.'));
+      return;
+    }
+    for (const q of quotes) {
+      const li = el('li', 'quote');
+      const bq = el('blockquote', null, q.body);
+      li.appendChild(bq);
+      if (q.page) li.appendChild(el('p', 'quote-page', `Pàgina ${q.page}`));
+      if (mine) {
+        const x = el('button', 'icon-btn', '×');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Esborra la cita');
+        x.addEventListener('click', async () => {
+          try {
+            await DB.removeQuote(q.id);
+            renderQuotes(book, quotes.filter(o => o.id !== q.id));
+            toast('Cita esborrada');
+          } catch (e) { toast(e.message); }
+        });
+        li.appendChild(x);
+      }
+      ul.appendChild(li);
+    }
+  }
+
+  function renderComments(book, comments) {
+    const ul = $('comments');
+    ul.innerHTML = '';
+    if (!comments.length) {
+      ul.appendChild(el('li', 'muted empty-note', 'Encara no hi ha comentaris. Sigues el primer.'));
+      return;
+    }
+    const ownsBook = state.me && book.profile_id === state.me.id;
+    for (const c of comments) {
+      const li = el('li', 'comment');
+      const head = el('p', 'comment-head');
+      const who = (c.author && c.author.display_name) || '—';
+      head.append(el('span', 'comment-author', who), el('span', 'comment-date', dateFmt.format(new Date(c.created_at))));
+      li.append(head, el('p', 'comment-body', c.body));
+      if (ownsBook || (state.me && c.author_id === state.me.id)) {
+        const x = el('button', 'btn-link small', 'Esborra');
+        x.type = 'button';
+        x.setAttribute('aria-label', `Esborra el comentari de ${who}`);
+        x.addEventListener('click', async () => {
+          try {
+            await DB.removeComment(c.id);
+            renderComments(book, comments.filter(o => o.id !== c.id));
+            toast('Comentari esborrat');
+          } catch (e) { toast(e.message); }
+        });
+        head.appendChild(x);
+      }
+      ul.appendChild(li);
+    }
+  }
+
+  function bindBookPage() {
+    $('review-open').addEventListener('click', () => {
+      $('review-input').value = state.book.review || '';
+      $('review-form').hidden = false;
+      $('review-open').hidden = true;
+      $('review-text').hidden = true;
+      $('review-input').focus();
+    });
+    $('review-cancel').addEventListener('click', () => {
+      $('review-text').hidden = false;
+      renderReview(state.book, true);
+    });
+    $('review-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        const saved = await DB.updateBook(state.book.id, { review: $('review-input').value.trim() || null });
+        replaceBook(saved);
+        $('review-text').hidden = false;
+        renderReview(saved, true);
+        toast('Ressenya desada');
+      } catch (err) { toast(err.message); }
+    });
+    $('quote-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const body = $('quote-input').value.trim();
+      if (!body) { $('quote-input').focus(); return; }
+      try {
+        await DB.addQuote(state.book.id, body, $('quote-page').value.trim());
+        $('quote-input').value = $('quote-page').value = '';
+        renderQuotes(state.book, await DB.listQuotes(state.book.id));
+        toast('Cita afegida');
+      } catch (err) { toast(err.message); }
+    });
+    $('comment-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const body = $('comment-input').value.trim();
+      if (!body) { $('comment-input').focus(); return; }
+      const btn = e.submitter;
+      if (btn) btn.disabled = true;
+      try {
+        await DB.addComment(state.book.id, body);
+        $('comment-input').value = '';
+        renderComments(state.book, await DB.listComments(state.book.id));
+        toast('Comentari publicat');
+      } catch (err) { toast(err.message); }
+      finally { if (btn) btn.disabled = false; }
+    });
+  }
+
+  async function markRead(book) {
+    try {
+      const saved = await DB.updateBook(book.id, { list: 'shelf' });
+      replaceBook(saved);
+      state.list = 'shelf';
+      state.decade = 'all';
+      toast('Mogut a Llegits');
+      renderBookPage(saved.id);
+    } catch (e) { toast(e.message); }
+  }
+
+  function removeBook(book) {
     const dlg = $('confirm');
-    $('confirm-text').textContent = `“${book.title}” will be taken off your shelf. This can’t be undone.`;
+    const where = (book.list || 'shelf') === 'wishlist' ? 'de la llista Per llegir' : 'de la prestatgeria';
+    $('confirm-title').textContent = 'Vols treure aquest llibre?';
+    $('confirm-text').textContent = `«${T(book)}» sortirà ${where}, amb les seves cites i comentaris. No es pot desfer.`;
     dlg.returnValue = '';
     dlg.showModal();
     dlg.addEventListener('close', async () => {
       if (dlg.returnValue !== 'yes') return;
       try {
         await DB.removeBook(book.id);
-        state.books = state.books.filter(b => b.id !== book.id);
-        afterBooksChanged();
-        toast('Removed from your shelf');
-        location.hash = '#/';
+        storeBooks(book.profile_id, (state.cache.get(book.profile_id) || []).filter(b => b.id !== book.id));
+        toast('Llibre tret');
+        location.hash = shelfHref(book.profile_id, book.list || 'shelf');
       } catch (e) { toast(e.message); }
     }, { once: true });
   }
 
-  function afterBooksChanged(focusId) {
-    state.books = sortBooks(state.books);
-    setHeader();
-    renderFilters();
-    fillShelf(focusId);
-  }
-
   // ------------------------------------------------------- add / edit
 
-  const PREVIEW_H = () => Math.round(Math.min(window.innerHeight * 0.5, 440));
+  const PREVIEW_H = () => Math.round(Math.min(($('preview-stage').clientHeight || 400) * 0.82, window.innerHeight * 0.5, 440));
 
-  function emptyDraft() {
-    return { title: '', author: '', year: null, pages: null, genre: '', description: '',
-      cover_url: null, cover_data: null, cover_aspect: 0.66, spine_color: null, isbn: null, source: null };
+  const GENRES = {
+    fiction: 'Ficció', novel: 'Novel·la', novels: 'Novel·la', poetry: 'Poesia', essays: 'Assaig', essay: 'Assaig',
+    biography: 'Biografia', history: 'Història', philosophy: 'Filosofia', memoir: 'Memòries',
+    'short stories': 'Contes', 'science fiction': 'Ciència-ficció', fantasy: 'Fantasia', romance: 'Romàntica',
+    thriller: 'Thriller', thrillers: 'Thriller', mystery: 'Misteri', drama: 'Teatre', 'young adult fiction': 'Juvenil'
+  };
+
+  function emptyDraft(list) {
+    return { title: '', title_en: '', author: '', year: null, pages: null, genre: '', description: '',
+      cover_url: null, cover_data: null, cover_aspect: 0.66, spine_color: null, cover_tone: null,
+      isbn: null, source: null, list: list || 'shelf' };
+  }
+
+  function setTitleLang(lang) {
+    state.titleLang = lang;
+    for (const b of document.querySelectorAll('#title-lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+    for (const f of document.querySelectorAll('.title-field')) f.hidden = f.dataset.lang !== lang;
+    const other = lang === 'ca' ? $('f-title-en') : $('f-title');
+    const otherName = lang === 'ca' ? 'anglès' : 'català';
+    $('title-hint').textContent = other.value.trim()
+      ? `També té títol en ${otherName}: «${other.value.trim()}».`
+      : `Pots posar-hi també el títol en ${otherName}: tria la llengua per escriure’l.`;
+  }
+
+  function setDraftList(list) {
+    state.draft.list = list;
+    for (const b of document.querySelectorAll('#f-list button')) b.setAttribute('aria-pressed', String(b.dataset.list === list));
+    if (!state.editingId) $('book-save').textContent = list === 'wishlist' ? 'Afegeix a Per llegir' : 'Afegeix a la prestatgeria';
   }
 
   function renderSwatches() {
     const box = $('swatches');
     box.innerHTML = '';
-    const current = (state.draft.spine_color || Books.hashSwatch(state.draft.title).hex).toLowerCase();
-    for (const p of Books.PALETTE) {
-      const label = document.createElement('label');
-      label.className = 'swatch';
+    const d = state.draft;
+    const current = (d.spine_color || d.cover_tone || Books.hashSwatch(d.title_en || d.title).hex).toLowerCase();
+    const options = [];
+    if (d.cover_tone) options.push({ hex: d.cover_tone.toLowerCase(), name: 'Color de la coberta', cover: true });
+    for (const p of Books.PALETTE) if (!options.some(o => o.hex === p.hex)) options.push(p);
+    if (!options.some(o => o.hex === current)) options.unshift({ hex: current, name: 'Color actual' });
+    for (const p of options) {
+      const label = el('label', 'swatch' + (p.cover ? ' is-cover' : ''));
       label.style.setProperty('--c', p.hex);
       const input = document.createElement('input');
       input.type = 'radio';
       input.name = 'spine';
       input.value = p.hex;
       input.checked = p.hex === current;
-      input.addEventListener('change', () => { state.draft.spine_color = p.hex; renderPreview(); });
-      const span = document.createElement('span');
-      span.className = 'sr-only';
-      span.textContent = p.name;
-      label.append(input, span);
+      input.addEventListener('change', () => { d.spine_color = p.hex; renderPreview(); });
+      label.append(input, el('span', 'sr-only', p.name));
       box.appendChild(label);
     }
   }
@@ -268,19 +624,17 @@
     const stage = $('preview-stage');
     stage.innerHTML = '';
     const d = state.draft;
-    if (!d || !d.title) { $('preview-note').hidden = false; return; }
+    if (!d || !(d.title || d.title_en)) { $('preview-note').hidden = false; return; }
     $('preview-note').hidden = true;
     const root = figure(stage, d, PREVIEW_H());
-    if (animate && !reduceMotion()) {
-      gsap.fromTo(root, { rotationY: 90 }, { rotationY: 38, duration: 1.1, ease: 'power3.out' });
-    } else {
-      gsap.set(root, { rotationY: 38 });
-    }
+    if (animate && !reduceMotion()) gsap.fromTo(root, { rotationY: 90 }, { rotationY: 38, duration: 1.1, ease: 'power3.out' });
+    else gsap.set(root, { rotationY: 38 });
   }
 
   function fillForm() {
     const d = state.draft;
     $('f-title').value = d.title || '';
+    $('f-title-en').value = d.title_en || '';
     $('f-author').value = d.author || '';
     $('f-year').value = d.year ?? '';
     $('f-pages').value = d.pages ?? '';
@@ -289,6 +643,8 @@
     $('f-cover').value = '';
     $('f-cover-clear').hidden = !(d.cover_url || d.cover_data);
     $('book-error').textContent = '';
+    setTitleLang(d.title || !d.title_en ? 'ca' : 'en');
+    setDraftList(d.list || 'shelf');
     renderSwatches();
   }
 
@@ -298,29 +654,36 @@
     renderPreview(animate);
   }
 
-  function openEditView(id) {
+  function openEditView(id, list) {
     state.searchSeq++;
     $('results').innerHTML = '';
     $('search-status').textContent = '';
     $('search-q').value = '';
     if (id) {
-      const book = state.books.find(b => b.id === id);
+      const book = (state.cache.get(state.me.id) || []).find(b => b.id === id);
       if (!book) { location.hash = '#/'; return; }
       state.editingId = id;
-      state.draft = { ...book };
-      $('edit-title').textContent = 'Edit details';
-      $('book-save').textContent = 'Save changes';
-      $('book-cancel').href = `#/book/${id}`;
-      $('back').href = `#/book/${id}`;
+      state.draft = { ...book, cover_tone: null };
+      $('edit-title').textContent = 'Edita els detalls';
+      $('book-save').textContent = 'Desa els canvis';
+      $('book-cancel').href = `#/llibre/${id}`;
+      $('back').href = `#/llibre/${id}`;
+      $('back-label').textContent = 'Llibre';
       $('search-form').hidden = true;
+      $('list-field').hidden = true;
       showForm(false);
+      const src = Books.coverSrc(book);
+      if (src) Books.sampleColour(src).then(c => { if (c && state.draft && state.editingId === id) { state.draft.cover_tone = c; renderSwatches(); } });
     } else {
       state.editingId = null;
       state.draft = null;
-      $('edit-title').textContent = 'Add a book';
-      $('book-save').textContent = 'Add to shelf';
-      $('book-cancel').href = '#/';
+      state.newList = list || 'shelf';
+      $('edit-title').textContent = list === 'wishlist' ? 'Afegeix a Per llegir' : 'Afegeix un llibre';
+      $('book-cancel').href = list === 'wishlist' ? '#/per-llegir' : '#/';
+      $('back').href = $('book-cancel').href;
+      $('back-label').textContent = list === 'wishlist' ? 'Per llegir' : 'Prestatgeria';
       $('search-form').hidden = false;
+      $('list-field').hidden = false;
       $('book-form').hidden = true;
       renderPreview();
       setTimeout(() => $('search-q').focus(), 50);
@@ -333,7 +696,7 @@
     const status = $('search-status');
     const list = $('results');
     list.innerHTML = '';
-    status.textContent = 'Searching…';
+    status.textContent = 'Cercant…';
     const isbn = q.replace(/[-\s]/g, '');
     const params = new URLSearchParams({
       fields: 'key,title,author_name,first_publish_year,number_of_pages_median,cover_i,isbn,subject',
@@ -346,22 +709,20 @@
       const json = await res.json();
       if (seq !== state.searchSeq) return;
       const docs = (json.docs || []).filter(d => d.title);
-      status.textContent = docs.length ? `${docs.length} result${docs.length > 1 ? 's' : ''}` : 'Nothing found. Try other words, or add it by hand.';
+      status.textContent = docs.length ? plural(docs.length, 'resultat', 'resultats') : 'No s’ha trobat res. Prova amb altres paraules o afegeix-lo a mà.';
       for (const doc of docs) list.appendChild(resultItem(doc));
     } catch (e) {
       if (seq !== state.searchSeq) return;
       console.error(e);
-      status.textContent = 'Search isn’t available right now. You can still add the book by hand.';
+      status.textContent = 'La cerca no està disponible ara mateix. Encara pots afegir el llibre a mà.';
     }
   }
 
   function resultItem(doc) {
     const li = document.createElement('li');
-    const btn = document.createElement('button');
+    const btn = el('button', 'result');
     btn.type = 'button';
-    btn.className = 'result';
-    const thumb = document.createElement('span');
-    thumb.className = 'result-thumb';
+    const thumb = el('span', 'result-thumb');
     if (doc.cover_i) {
       const img = document.createElement('img');
       img.alt = '';
@@ -369,56 +730,67 @@
       img.src = `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg`;
       thumb.appendChild(img);
     }
-    const text = document.createElement('span');
-    text.className = 'result-text';
-    const t = document.createElement('span');
-    t.className = 'result-title';
-    t.textContent = doc.title;
-    const m = document.createElement('span');
-    m.className = 'result-meta';
-    m.textContent = [doc.author_name && doc.author_name.slice(0, 2).join(', '), doc.first_publish_year].filter(Boolean).join(' · ');
-    text.append(t, m);
+    const text = el('span', 'result-text');
+    text.append(
+      el('span', 'result-title', doc.title),
+      el('span', 'result-meta', [doc.author_name && doc.author_name.slice(0, 2).join(', '), doc.first_publish_year].filter(Boolean).join(' · '))
+    );
     btn.append(thumb, text);
     btn.addEventListener('click', () => pickResult(doc, btn));
     li.appendChild(btn);
     return li;
   }
 
+  function genreFrom(subjects) {
+    for (const s of subjects || []) {
+      const k = s.toLowerCase().trim();
+      if (GENRES[k]) return GENRES[k];
+    }
+    return '';
+  }
+
   async function pickResult(doc, btn) {
     for (const b of document.querySelectorAll('.result')) b.classList.toggle('is-picked', b === btn);
     const cover = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : null;
-    const genre = (doc.subject || []).find(s => /^(fiction|novel|poetry|essays?|biography|history|philosophy|memoir|short stories|science fiction|fantasy|romance|thriller|mystery|drama)/i.test(s)) || '';
     state.draft = {
-      ...emptyDraft(),
-      title: doc.title,
+      ...emptyDraft(state.newList),
+      title: '',
+      title_en: doc.title,
       author: (doc.author_name || []).join(', '),
       year: doc.first_publish_year ?? null,
       pages: doc.number_of_pages_median ?? null,
-      genre: genre ? genre[0].toUpperCase() + genre.slice(1) : '',
+      genre: genreFrom(doc.subject),
       cover_url: cover,
       isbn: (doc.isbn || [])[0] || null,
       source: `openlibrary:${doc.key}`
     };
-    state.draft.spine_color = Books.hashSwatch(doc.title).hex;
     showForm(true);
     $('book-form').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
 
     const draft = state.draft;
-    // Fill in details that need extra requests: cover shape, colour, description.
-    const [aspect, colour, desc] = await Promise.all([
+    // Details that need more requests: cover shape and colour, synopsis, and
+    // the Catalan / English titles from Open Library's editions.
+    const [aspect, colour, work, editions] = await Promise.all([
       Books.measureAspect(cover),
       Books.sampleColour(cover),
-      fetch(`https://openlibrary.org${doc.key}.json`).then(r => r.ok ? r.json() : null).catch(() => null)
+      fetch(`https://openlibrary.org${doc.key}.json`).then(r => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`https://openlibrary.org${doc.key}/editions.json?limit=200`).then(r => (r.ok ? r.json() : null)).catch(() => null)
     ]);
     if (state.draft !== draft) return;
-    if (cover && aspect == null) { draft.cover_url = null; $('f-cover-clear').hidden = true; } // no real cover
+    if (cover && aspect == null) { draft.cover_url = null; $('f-cover-clear').hidden = true; }
     if (aspect) draft.cover_aspect = aspect;
-    if (colour) draft.spine_color = colour;
-    const text = desc && (typeof desc.description === 'string' ? desc.description : desc.description && desc.description.value);
+    if (colour) { draft.cover_tone = colour; if (!draft.spine_color) draft.spine_color = colour; }
+    const text = work && (typeof work.description === 'string' ? work.description : work.description && work.description.value);
     if (text && !$('f-desc').value) {
       draft.description = text.replace(/\r/g, '').replace(/\(\[source\]\[\d+\]\)|\[\d+\]:.*$/gm, '').replace(/-{3,}[\s\S]*$/, '').trim().slice(0, 4000);
       $('f-desc').value = draft.description;
     }
+    const entries = (editions && editions.entries) || [];
+    const inLang = code => entries.find(e => (e.languages || []).some(l => l.key === `/languages/${code}`) && e.title);
+    const ca = inLang('cat'), en = inLang('eng');
+    if (ca && !$('f-title').value.trim()) { draft.title = ca.title; $('f-title').value = ca.title; }
+    if (en && en.title) { draft.title_en = en.title; $('f-title-en').value = en.title; }
+    setTitleLang(draft.title ? 'ca' : 'en');
     renderSwatches();
     renderPreview();
   }
@@ -427,6 +799,7 @@
     const d = state.draft;
     const num = v => { const n = parseInt(String(v).trim(), 10); return Number.isFinite(n) ? n : null; };
     d.title = $('f-title').value.trim();
+    d.title_en = $('f-title-en').value.trim();
     d.author = $('f-author').value.trim() || null;
     d.year = num($('f-year').value);
     d.pages = num($('f-pages').value);
@@ -435,9 +808,9 @@
   }
 
   function validate(d) {
-    if (!d.title) return ['f-title', 'Add the book’s title.'];
-    if (d.year != null && (d.year < -3000 || d.year > 2100)) return ['f-year', 'The year looks wrong.'];
-    if (d.pages != null && (d.pages < 1 || d.pages > 20000)) return ['f-pages', 'Pages should be between 1 and 20,000.'];
+    if (!d.title && !d.title_en) return ['f-title', 'Escriu el títol del llibre (en català o en anglès).'];
+    if (d.year != null && (d.year < -3000 || d.year > 2100)) return ['f-year', 'L’any no sembla correcte.'];
+    if (d.pages != null && (d.pages < 1 || d.pages > 20000)) return ['f-pages', 'Les pàgines han d’estar entre 1 i 20.000.'];
     return null;
   }
 
@@ -446,28 +819,36 @@
     readForm();
     const d = state.draft;
     const problem = validate(d);
-    if (problem) { $('book-error').textContent = problem[1]; $(problem[0]).focus(); return; }
-    const fields = ['title', 'author', 'year', 'pages', 'genre', 'description', 'cover_url', 'cover_data', 'cover_aspect', 'spine_color', 'isbn', 'source'];
+    if (problem) {
+      $('book-error').textContent = problem[1];
+      if (problem[0] === 'f-title') setTitleLang(state.titleLang);
+      $(problem[0] === 'f-title' && state.titleLang === 'en' ? 'f-title-en' : problem[0]).focus();
+      return;
+    }
+    const fields = ['title', 'title_en', 'author', 'year', 'pages', 'genre', 'description', 'cover_url', 'cover_data', 'cover_aspect', 'spine_color', 'isbn', 'source', 'list'];
     const payload = {};
-    for (const f of fields) payload[f] = d[f] ?? null;
+    for (const f of fields) payload[f] = d[f] === '' ? null : (d[f] ?? null);
     payload.cover_aspect = payload.cover_aspect || 0.66;
-    payload.spine_color = payload.spine_color || Books.hashSwatch(d.title).hex;
+    payload.spine_color = payload.spine_color || d.cover_tone || Books.hashSwatch(d.title_en || d.title).hex;
+    payload.list = payload.list || 'shelf';
     const btn = $('book-save');
     btn.disabled = true;
     try {
+      const mine = state.cache.get(state.me.id) || [];
       if (state.editingId) {
+        delete payload.list;
         const saved = await DB.updateBook(state.editingId, payload);
-        state.books = state.books.map(b => (b.id === saved.id ? saved : b));
-        afterBooksChanged(saved.id);
-        toast('Changes saved');
-        location.hash = `#/book/${saved.id}`;
+        storeBooks(state.me.id, mine.map(b => (b.id === saved.id ? saved : b)));
+        toast('Canvis desats');
+        location.hash = `#/llibre/${saved.id}`;
       } else {
         const saved = await DB.addBook(payload);
-        state.books.push(saved);
+        storeBooks(state.me.id, [...mine, saved]);
+        state.list = saved.list;
         state.decade = 'all';
-        afterBooksChanged(saved.id);
-        toast('Added to your shelf');
-        location.hash = '#/';
+        state.pendingFocus = saved.id;
+        toast(saved.list === 'wishlist' ? 'Afegit a Per llegir' : 'Afegit a la prestatgeria');
+        location.hash = shelfHref(state.me.id, saved.list);
       }
     } catch (err) {
       $('book-error').textContent = err.message;
@@ -484,11 +865,19 @@
     });
     $('manual-btn').addEventListener('click', () => {
       for (const b of document.querySelectorAll('.result')) b.classList.remove('is-picked');
-      state.draft = { ...emptyDraft(), title: $('search-q').value.trim() };
+      state.draft = { ...emptyDraft(state.newList), title: $('search-q').value.trim() };
       showForm(true);
       $('f-title').focus();
     });
-    for (const id of ['f-title', 'f-author', 'f-year', 'f-pages']) {
+    for (const b of document.querySelectorAll('#title-lang button')) {
+      b.addEventListener('click', () => {
+        readForm();
+        setTitleLang(b.dataset.lang);
+        (b.dataset.lang === 'ca' ? $('f-title') : $('f-title-en')).focus();
+      });
+    }
+    for (const b of document.querySelectorAll('#f-list button')) b.addEventListener('click', () => setDraftList(b.dataset.list));
+    for (const id of ['f-title', 'f-title-en', 'f-author', 'f-year', 'f-pages']) {
       $(id).addEventListener('input', () => {
         if (!state.draft) return;
         readForm();
@@ -501,11 +890,9 @@
       if (!file) return;
       try {
         const { dataUrl, aspect } = await Books.processUpload(file);
-        state.draft.cover_data = dataUrl;
-        state.draft.cover_url = null;
-        state.draft.cover_aspect = aspect;
+        Object.assign(state.draft, { cover_data: dataUrl, cover_url: null, cover_aspect: aspect });
         const colour = await Books.sampleColour(dataUrl);
-        if (colour) state.draft.spine_color = colour;
+        if (colour) { state.draft.cover_tone = colour; state.draft.spine_color = colour; }
         $('f-cover-clear').hidden = false;
         $('book-error').textContent = '';
         renderSwatches();
@@ -513,11 +900,49 @@
       } catch (err) { $('book-error').textContent = err.message; }
     });
     $('f-cover-clear').addEventListener('click', () => {
-      Object.assign(state.draft, { cover_url: null, cover_data: null, cover_aspect: 0.66 });
+      Object.assign(state.draft, { cover_url: null, cover_data: null, cover_aspect: 0.66, cover_tone: null });
       $('f-cover-clear').hidden = true;
+      renderSwatches();
       renderPreview();
     });
     $('book-form').addEventListener('submit', saveBook);
+  }
+
+  // -------------------------------------------------------------- members
+
+  async function renderMembers() {
+    const ul = $('members');
+    ul.innerHTML = '';
+    ul.appendChild(el('li', 'muted', 'Carregant…'));
+    try {
+      const shelves = await DB.listShelves();
+      ul.innerHTML = '';
+      const sorted = shelves.slice().sort((a, b) => (a.id === state.me.id ? -1 : b.id === state.me.id ? 1 : a.display_name.localeCompare(b.display_name, 'ca')));
+      for (const s of sorted) {
+        const li = el('li');
+        const a = el('a', 'member');
+        a.href = shelfHref(s.id, 'shelf');
+        const spines = el('span', 'member-spines');
+        spines.setAttribute('aria-hidden', 'true');
+        const n = Math.min(Number(s.read_count) || 0, 7);
+        for (let i = 0; i < Math.max(n, 1); i++) {
+          const sp = el('span');
+          sp.style.setProperty('--c', n ? Books.PALETTE[(i * 3 + s.display_name.length) % Books.PALETTE.length].hex : 'transparent');
+          if (!n) sp.classList.add('ghost');
+          spines.appendChild(sp);
+        }
+        const name = el('span', 'member-name', s.display_name);
+        if (s.id === state.me.id) name.appendChild(el('span', 'member-you', 'tu'));
+        const counts = el('span', 'member-counts',
+          `${plural(Number(s.read_count), 'llegit', 'llegits')} · ${Number(s.wish_count)} per llegir`);
+        a.append(spines, name, counts);
+        li.appendChild(a);
+        ul.appendChild(li);
+      }
+    } catch (e) {
+      ul.innerHTML = '';
+      ul.appendChild(el('li', 'muted', e.message));
+    }
   }
 
   // ------------------------------------------------------------- sign in
@@ -527,22 +952,21 @@
     mode = m;
     $('tab-in').setAttribute('aria-selected', String(m === 'in'));
     $('tab-up').setAttribute('aria-selected', String(m === 'up'));
-    for (const el of document.querySelectorAll('.only-up')) el.hidden = m !== 'up';
-    $('auth-submit').textContent = m === 'in' ? 'Sign in' : 'Create shelf';
+    for (const n of document.querySelectorAll('.only-up')) n.hidden = m !== 'up';
+    $('auth-submit').textContent = m === 'in' ? 'Entra' : 'Crea la prestatgeria';
     $('auth-pass').autocomplete = m === 'in' ? 'current-password' : 'new-password';
-    $('signin-title').textContent = m === 'in' ? 'Open your shelf' : 'Start a shelf';
+    $('signin-title').textContent = m === 'in' ? 'Obre la teva prestatgeria' : 'Comença una prestatgeria';
     $('auth-error').textContent = '';
   }
 
   const AUTH_ERRORS = {
-    wrong: 'That username and password don’t match.',
-    locked: 'Too many wrong attempts. Wait 15 minutes and try again.',
-    taken: 'That username is taken. Try another.',
-    weak: 'Use a password of at least 8 characters.',
-    bad_username: 'Usernames use 2–24 letters, numbers, dots, dashes or underscores.',
-    bad_name: 'Add your name (up to 40 characters).',
-    busy: 'Lots of new shelves right now. Try again in an hour.',
-    no_session: 'Something went wrong. Please try again.'
+    wrong: 'El nom d’usuari i la contrasenya no coincideixen.',
+    locked: 'Massa intents fallits. Torna-ho a provar d’aquí a 15 minuts.',
+    taken: 'Aquest nom d’usuari ja existeix. Prova’n un altre.',
+    weak: 'La contrasenya ha de tenir com a mínim 4 caràcters.',
+    bad_username: 'El nom d’usuari ha de tenir entre 2 i 30 caràcters.',
+    busy: 'Ara mateix s’estan creant moltes prestatgeries. Torna-ho a provar d’aquí a una hora.',
+    no_session: 'Alguna cosa no ha funcionat. Torna-ho a provar.'
   };
 
   function bindAuth() {
@@ -553,22 +977,23 @@
       const err = $('auth-error');
       const user = $('auth-user').value.trim();
       const pass = $('auth-pass').value;
-      if (!user || !pass) { err.textContent = 'Enter your username and password.'; return; }
+      if (!user || !pass) { err.textContent = 'Escriu el nom d’usuari i la contrasenya.'; return; }
       if (mode === 'up') {
-        if (pass !== $('auth-pass2').value) { err.textContent = 'The passwords don’t match.'; return; }
+        if ([...user].length < 2) { err.textContent = AUTH_ERRORS.bad_username; return; }
+        if ([...pass].length < 4) { err.textContent = AUTH_ERRORS.weak; return; }
+        if (pass !== $('auth-pass2').value) { err.textContent = 'Les contrasenyes no coincideixen.'; return; }
       }
       const btn = $('auth-submit');
       btn.disabled = true;
       err.textContent = '';
       try {
-        const result = mode === 'in'
-          ? await DB.signIn(user, pass)
-          : await DB.signUp(user, $('auth-name').value.trim() || user, pass);
+        const result = mode === 'in' ? await DB.signIn(user, pass) : await DB.signUp(user, pass);
         if (result !== 'ok') { err.textContent = AUTH_ERRORS[result] || AUTH_ERRORS.no_session; return; }
         $('auth-pass').value = $('auth-pass2').value = '';
-        await loadShelf();
-        location.hash = '#/';
-        route();
+        state.me = await DB.whoami();
+        state.cache.clear();
+        state.owner = null;
+        if (location.hash === '#/' || !location.hash) route(); else location.hash = '#/';
       } catch (ex) {
         err.textContent = ex.message;
       } finally {
@@ -578,42 +1003,76 @@
     $('sign-out').addEventListener('click', async () => {
       await DB.signOut();
       state.me = null;
+      state.owner = null;
+      state.cache.clear();
       state.books = [];
       setHeader();
-      location.hash = '#/signin';
-      route();
+      location.hash = '#/entra';
     });
   }
 
   // --------------------------------------------------------------- router
 
-  async function loadShelf() {
-    state.me = await DB.whoami();
-    if (!state.me) return;
-    state.books = sortBooks(await DB.listBooks());
-    afterBooksChanged();
+  async function showShelf(ownerId, list) {
+    const changed = !state.owner || state.owner.id !== ownerId || state.list !== list;
+    if (changed && state.list !== list) state.decade = 'all';
+    state.list = list;
+    await loadOwner(ownerId);
+    show('shelf');
+    const key = `${ownerId}:${list}:${window.SHELF_LANG}`;
+    const focus = state.pendingFocus;
+    state.pendingFocus = null;
+    if (key !== state.shelfKey || focus) {
+      state.shelfKey = key;
+      state.decade = changed ? 'all' : state.decade;
+      refreshShelf(focus);
+    } else {
+      renderTabs();
+      renderFilters();
+      setHeader();
+    }
+    state.shelf.resize();
+    if (!reduceMotion()) gsap.fromTo('#stage .track', { opacity: 0 }, { opacity: 1, duration: 0.4 });
+    $('stage').focus({ preventScroll: true });
   }
 
-  function route() {
-    const hash = location.hash.replace(/^#\/?/, '');
-    const [page, id] = hash.split('/');
+  async function route() {
+    const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (_) { return x; } });
+    const [page, a, b] = parts;
     if (!state.me) {
       show('signin');
       setHeader();
       return;
     }
-    $('back').href = '#/';
-    if (page === 'book' && id) { show('book'); renderBookPage(id); }
-    else if (page === 'add') { show('edit'); openEditView(null); }
-    else if (page === 'edit' && id) { show('edit'); openEditView(id); }
-    else {
-      if (hash && hash !== 'signin') { location.replace('#/'); }
-      show('shelf');
-      state.shelf.resize();
-      if (!reduceMotion() && state.view === 'shelf') {
-        gsap.fromTo('#stage .track', { opacity: 0 }, { opacity: 1, duration: 0.4 });
+    try {
+      if (page === 'llibre' && a) {
+        show('book');
+        await renderBookPage(a);
+      } else if (page === 'afegeix') {
+        await loadOwner(state.me.id);
+        show('edit');
+        openEditView(null, a === 'per-llegir' ? 'wishlist' : 'shelf');
+      } else if (page === 'edita' && a) {
+        await loadOwner(state.me.id);
+        show('edit');
+        openEditView(a);
+      } else if (page === 'prestatgeries') {
+        show('members');
+        state.owner = null;
+        setHeader();
+        renderMembers();
+      } else if (page === 'u' && a) {
+        if (a === state.me.id) { location.replace(b === 'per-llegir' ? '#/per-llegir' : '#/'); return; }
+        await showShelf(a, b === 'per-llegir' ? 'wishlist' : 'shelf');
+      } else if (page === 'per-llegir') {
+        await showShelf(state.me.id, 'wishlist');
+      } else {
+        if (page && page !== 'entra') { location.replace('#/'); return; }
+        await showShelf(state.me.id, 'shelf');
       }
-      $('stage').focus({ preventScroll: true });
+    } catch (e) {
+      toast(e.message);
+      if (page) location.replace('#/');
     }
     window.scrollTo(0, 0);
   }
@@ -622,15 +1081,23 @@
     state.shelf = new Shelf($('stage'), { onFocus, onOpen: openBook });
     $('prev').addEventListener('click', () => state.shelf.step(-1));
     $('next').addEventListener('click', () => state.shelf.step(1));
+    for (const b of document.querySelectorAll('#list-tabs button')) {
+      b.addEventListener('click', () => {
+        if (!state.owner || b.dataset.list === state.list) return;
+        location.hash = shelfHref(state.owner.id, b.dataset.list);
+      });
+    }
+    for (const b of document.querySelectorAll('#lang button')) b.addEventListener('click', () => setLang(b.dataset.lang));
     bindAuth();
     bindEdit();
+    bindBookPage();
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && (state.view === 'book' || state.view === 'edit') && !$('confirm').open) {
-        location.hash = $('back').getAttribute('href');
-      }
+      if (e.key !== 'Escape' || $('confirm').open) return;
+      if (/^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) return;
+      if (state.view === 'book' || state.view === 'edit') location.hash = $('back').getAttribute('href');
     });
     try {
-      await loadShelf();
+      state.me = await DB.whoami();
     } catch (e) {
       $('auth-error').textContent = e.message;
     }

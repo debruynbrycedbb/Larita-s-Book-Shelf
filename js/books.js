@@ -13,13 +13,13 @@
   // mixed covers still reads as one set.
   const PALETTE = [
     { id: 'cobalt', hex: '#2340b8', ink: '#efe9db', name: 'Cobalt' },
-    { id: 'ink',    hex: '#1f1d1b', ink: '#ece5d4', name: 'Ink' },
-    { id: 'cream',  hex: '#e6dcc6', ink: '#1f1d1b', name: 'Cream' },
-    { id: 'green',  hex: '#1f4f43', ink: '#ece5d4', name: 'Bottle green' },
-    { id: 'brick',  hex: '#b4442e', ink: '#f3ecdc', name: 'Brick' },
-    { id: 'ochre',  hex: '#c8973c', ink: '#1f1d1b', name: 'Ochre' },
-    { id: 'slate',  hex: '#4a5b6c', ink: '#ece5d4', name: 'Slate' },
-    { id: 'rose',   hex: '#c98f86', ink: '#1f1d1b', name: 'Rose' }
+    { id: 'ink',    hex: '#1f1d1b', ink: '#ece5d4', name: 'Tinta' },
+    { id: 'cream',  hex: '#e6dcc6', ink: '#1f1d1b', name: 'Crema' },
+    { id: 'green',  hex: '#1f4f43', ink: '#ece5d4', name: 'Verd ampolla' },
+    { id: 'brick',  hex: '#b4442e', ink: '#f3ecdc', name: 'Maó' },
+    { id: 'ochre',  hex: '#c8973c', ink: '#1f1d1b', name: 'Ocre' },
+    { id: 'slate',  hex: '#4a5b6c', ink: '#ece5d4', name: 'Pissarra' },
+    { id: 'rose',   hex: '#c98f86', ink: '#1f1d1b', name: 'Rosa' }
   ];
 
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -49,22 +49,47 @@
     return lum > 0.55 ? '#1f1d1b' : '#efe9db';
   }
 
+  // Title in the chosen language, falling back to the other one.
+  function titleOf(book, lang) {
+    lang = lang || window.SHELF_LANG || 'ca';
+    const ca = (book.title || '').trim(), en = (book.title_en || '').trim();
+    return lang === 'en' ? (en || ca) : (ca || en);
+  }
+
   function spineColours(book) {
-    const sw = swatchFor(book.spine_color) || (book.spine_color ? null : hashSwatch(book.title));
+    const sw = swatchFor(book.spine_color) || (book.spine_color ? null : hashSwatch(titleOf(book, 'en')));
     if (sw) return { bg: sw.hex, ink: sw.ink };
     return { bg: book.spine_color, ink: inkFor(book.spine_color) };
   }
 
-  // Nearest palette swatch to an average cover colour. Hue matters more than
-  // lightness, and very grey covers go to ink, cream or slate.
-  function nearestSwatch([r, g, b]) {
-    let best = PALETTE[0], bestD = Infinity;
-    for (const p of PALETTE) {
-      const [pr, pg, pb] = hexToRgb(p.hex);
-      const d = 2 * (r - pr) ** 2 + 4 * (g - pg) ** 2 + 3 * (b - pb) ** 2;
-      if (d < bestD) { bestD = d; best = p; }
+  // Turns a cover's average colour into a spine colour: same hue as the
+  // cover, but toned so every spine sits well on the shelf and the shared
+  // spine typography stays readable. Light covers become pale paper spines;
+  // the rest become deep, slightly muted spines.
+  function toneColour([r, g, b]) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h /= 6;
     }
-    return best;
+    let S, L;
+    if (l > 0.66) { S = Math.min(s, 0.32); L = clamp(l, 0.8, 0.87); }
+    else { S = clamp(s, 0.08, 0.58); L = clamp(l, 0.2, 0.44); }
+    const hue2 = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = L < 0.5 ? L * (1 + S) : L + S - L * S, p = 2 * L - q;
+    const out = [hue2(p, q, h + 1 / 3), hue2(p, q, h), hue2(p, q, h - 1 / 3)];
+    return '#' + out.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
   }
 
   // Reads the dominant colour of an image. Resolves null when the image
@@ -90,7 +115,7 @@
             const w = 0.25 + (max - min) / 255; // favour colourful pixels
             R += r * w; G += g * w; B += b * w; W += w;
           }
-          done(nearestSwatch([R / W, G / W, B / W]).hex);
+          done(toneColour([R / W, G / W, B / W]));
         } catch (e) { done(null); }
       };
       img.onerror = () => done(null);
@@ -117,7 +142,7 @@
 
   // Turns an uploaded photo into a compact WebP data URL (max 640px tall).
   async function processUpload(file) {
-    if (!file || !/^image\//.test(file.type)) throw new Error('Choose an image file.');
+    if (!file || !/^image\//.test(file.type)) throw new Error('Tria un fitxer d’imatge.');
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, 640 / bmp.height);
     const c = document.createElement('canvas');
@@ -130,7 +155,7 @@
       q -= 0.12;
       url = c.toDataURL(url.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg', q);
     }
-    if (url.length > 380000) throw new Error('That image is too large. Try a smaller photo.');
+    if (url.length > 380000) throw new Error('La imatge és massa gran. Prova amb una foto més petita.');
     return { dataUrl: url, aspect: clamp(c.width / c.height, 0.45, 1.1) };
   }
 
@@ -208,9 +233,10 @@
     const emblem = el('div', 'spine-emblem');
     if (src) emblem.style.backgroundImage = `url("${src.replace(/"/g, '%22')}")`;
     else emblem.classList.add('plain');
-    const title = el('div', 'spine-title', book.title || '');
+    const shown = titleOf(book);
+    const title = el('div', 'spine-title', shown);
     title.lang = 'und';
-    fitSpineTitle(title, book.title || '', d);
+    fitSpineTitle(title, shown, d);
     const foot = el('div', 'spine-foot');
     const sn = surname(book.author);
     if (sn) foot.appendChild(el('span', 'spine-author', sn));
@@ -225,7 +251,7 @@
   function typeCover(book) {
     const c = el('div', 'type-cover');
     if (book.author) c.appendChild(el('span', 'tc-author', book.author));
-    c.appendChild(el('span', 'tc-title', book.title || ''));
+    c.appendChild(el('span', 'tc-title', titleOf(book)));
     c.appendChild(el('span', 'tc-rule'));
     if (book.year) c.appendChild(el('span', 'tc-year', String(book.year)));
     return c;
@@ -233,6 +259,6 @@
 
   window.Books = {
     PALETTE, build, dims, coverSrc, sampleColour, measureAspect, processUpload,
-    hashSwatch, spineColours, surname
+    hashSwatch, spineColours, surname, titleOf, toneColour
   };
 })();

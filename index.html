@@ -1,46 +1,55 @@
 <!doctype html>
-<html lang="en">
+<html lang="ca">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Larita's Book Shelf</title>
-  <meta name="description" content="A personal book shelf: every book you've read, lined up spine by spine. Pick one and it turns to show its cover.">
+  <meta name="description" content="Una prestatgeria de llibres: tots els que has llegit, llom a llom. Tria’n un i es gira per mostrar-te la coberta.">
   <meta name="theme-color" content="#edebe6">
   <meta property="og:title" content="Larita's Book Shelf">
-  <meta property="og:description" content="Every book, spine by spine. Pick one and it turns to show its cover.">
+  <meta property="og:description" content="Tots els llibres, llom a llom. Tria’n un i es gira per mostrar-te la coberta.">
   <meta property="og:type" content="website">
   <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="assets/fonts/newsreader-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/spine-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="css/style.css?v=1">
+  <link rel="stylesheet" href="css/style.css?v=2">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
+  <a class="skip-link" href="#main">Vés al contingut</a>
 
   <div class="app" id="app" data-view="loading">
     <header class="masthead">
-      <a class="back" id="back" href="#/" hidden>
+      <a class="back" id="back" href="#/" hidden aria-label="Torna a la prestatgeria">
         <span class="back-circle" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="24" height="24"><path d="M20 12H5m6-7-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
         </span>
-        <span class="back-label">Shelf</span>
+        <span class="back-label" id="back-label">Prestatgeria</span>
       </a>
 
-      <a class="brand" href="#/" aria-label="Larita's Book Shelf, home">
+      <nav class="topnav" id="topnav" aria-label="Prestatgeries" hidden>
+        <a href="#/" id="nav-mine">La meva prestatgeria</a>
+        <a href="#/prestatgeries" id="nav-all">Prestatgeries</a>
+      </nav>
+
+      <a class="brand" href="#/" aria-label="Larita's Book Shelf, inici">
         <span class="brand-title">Larita's Book Shelf</span>
         <span class="brand-sub" id="brand-sub"></span>
       </a>
 
       <div class="masthead-end">
-        <a class="btn btn-outline" id="add-link" href="#/add" hidden>Add a book <span aria-hidden="true">+</span></a>
+        <div class="lang" id="lang" role="group" aria-label="Llengua dels títols" hidden>
+          <button type="button" data-lang="ca" aria-pressed="true" title="Títols en català">CA</button>
+          <button type="button" data-lang="en" aria-pressed="false" title="Títols en anglès">EN</button>
+        </div>
+        <a class="btn btn-outline" id="add-link" href="#/afegeix" hidden aria-label="Afegeix un llibre"><span class="add-text">Afegeix un llibre</span> <span aria-hidden="true">+</span></a>
       </div>
     </header>
 
     <main id="main" tabindex="-1">
       <!-- Loading -->
       <section class="view view-loading" data-name="loading">
-        <p class="label">Opening the shelf…</p>
+        <p class="label">Obrint la prestatgeria…</p>
       </section>
 
       <!-- Sign in / create a shelf -->
@@ -48,55 +57,56 @@
         <div class="mini-shelf" aria-hidden="true">
           <span style="--c:#2340b8"></span><span style="--c:#e6dcc6"></span><span style="--c:#1f1d1b"></span><span style="--c:#1f4f43"></span><span style="--c:#b4442e"></span><span style="--c:#c8973c"></span><span style="--c:#4a5b6c"></span>
         </div>
-        <h1 class="signin-title" id="signin-title">Open your shelf</h1>
+        <h1 class="signin-title" id="signin-title">Obre la teva prestatgeria</h1>
 
-        <div class="segmented" role="tablist" aria-label="Sign in or create a shelf">
-          <button type="button" role="tab" id="tab-in" aria-selected="true" aria-controls="form-auth">Sign in</button>
-          <button type="button" role="tab" id="tab-up" aria-selected="false" aria-controls="form-auth">Create a shelf</button>
+        <div class="segmented" role="tablist" aria-label="Entra o crea una prestatgeria">
+          <button type="button" role="tab" id="tab-in" aria-selected="true" aria-controls="form-auth">Entra</button>
+          <button type="button" role="tab" id="tab-up" aria-selected="false" aria-controls="form-auth">Crea una prestatgeria</button>
         </div>
 
         <form class="auth-form" id="form-auth" novalidate>
-          <div class="field only-up" hidden>
-            <label for="auth-name">Your name</label>
-            <input id="auth-name" name="name" autocomplete="given-name" maxlength="40">
-            <p class="hint">Shown at the top of your shelf.</p>
+          <div class="field">
+            <label for="auth-user">Nom d’usuari</label>
+            <input id="auth-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="30" required>
+            <p class="hint only-up" hidden>El nom que vulguis, de 2 a 30 caràcters. És el que veuran els altres.</p>
           </div>
           <div class="field">
-            <label for="auth-user">Username</label>
-            <input id="auth-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24" required>
-            <p class="hint only-up" hidden>2–24 letters, numbers, dots, dashes or underscores.</p>
-          </div>
-          <div class="field">
-            <label for="auth-pass">Password</label>
+            <label for="auth-pass">Contrasenya</label>
             <input id="auth-pass" name="password" type="password" autocomplete="current-password" maxlength="72" required>
-            <p class="hint only-up" hidden>At least 8 characters.</p>
+            <p class="hint only-up" hidden>Com a mínim 4 caràcters: lletres, números o símbols.</p>
           </div>
           <div class="field only-up" hidden>
-            <label for="auth-pass2">Repeat password</label>
+            <label for="auth-pass2">Repeteix la contrasenya</label>
             <input id="auth-pass2" name="password2" type="password" autocomplete="new-password" maxlength="72">
           </div>
           <p class="form-error" id="auth-error" role="alert"></p>
-          <button class="btn btn-solid btn-wide" type="submit" id="auth-submit">Sign in</button>
+          <button class="btn btn-solid btn-wide" type="submit" id="auth-submit">Entra</button>
         </form>
       </section>
 
       <!-- The shelf -->
       <section class="view view-shelf" data-name="shelf" aria-labelledby="shelf-heading" hidden>
-        <h1 class="sr-only" id="shelf-heading">Book shelf</h1>
-        <div class="filters" id="filters" role="group" aria-label="Filter by decade published"></div>
+        <h1 class="sr-only" id="shelf-heading">Prestatgeria</h1>
+        <div class="shelf-bar">
+          <div class="tabs" id="list-tabs" role="group" aria-label="Llista">
+            <button type="button" data-list="shelf" aria-pressed="true">Llegits <span class="count" id="count-shelf"></span></button>
+            <button type="button" data-list="wishlist" aria-pressed="false">Per llegir <span class="count" id="count-wishlist"></span></button>
+          </div>
+          <div class="filters" id="filters" role="group" aria-label="Filtra per dècada de publicació"></div>
+        </div>
 
-        <div class="stage" id="stage" tabindex="0" role="region" aria-roledescription="carousel"
-             aria-label="Books. Use the left and right arrow keys to move, Enter to open.">
+        <div class="stage" id="stage" tabindex="0" role="region" aria-roledescription="carrusel"
+             aria-label="Llibres. Fes servir les fletxes esquerra i dreta per moure’t i Retorn per obrir-ne un.">
           <div class="empty" id="empty">
             <div class="empty-spines" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
-            <p class="empty-title">Your shelf is empty</p>
-            <p class="empty-text">Add the first book and it will appear here, spine out.</p>
-            <a class="btn btn-solid" href="#/add">Add a book</a>
+            <p class="empty-title" id="empty-title">La prestatgeria és buida</p>
+            <p class="empty-text" id="empty-text">Afegeix el primer llibre i apareixerà aquí, amb el llom a la vista.</p>
+            <a class="btn btn-solid" id="empty-add" href="#/afegeix">Afegeix un llibre</a>
           </div>
         </div>
 
         <div class="caption-row">
-          <button class="arrow arrow-prev" id="prev" type="button" aria-label="Previous book">
+          <button class="arrow arrow-prev" id="prev" type="button" aria-label="Llibre anterior">
             <svg viewBox="0 0 32 16" width="32" height="16" aria-hidden="true"><path d="M31 8H2m6-6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
           <div class="caption" id="caption" aria-hidden="true">
@@ -104,114 +114,196 @@
             <p class="caption-author label-blue" id="cap-author"></p>
             <p class="caption-year" id="cap-year"></p>
           </div>
-          <button class="arrow arrow-next" id="next" type="button" aria-label="Next book">
+          <button class="arrow arrow-next" id="next" type="button" aria-label="Llibre següent">
             <svg viewBox="0 0 32 16" width="32" height="16" aria-hidden="true"><path d="M1 8h29m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
         </div>
 
         <p class="sr-only" id="live" aria-live="polite"></p>
-        <nav class="sr-only" aria-label="All books on the shelf"><ol id="book-list"></ol></nav>
+        <nav class="sr-only" aria-label="Tots els llibres d’aquesta llista"><ol id="book-list"></ol></nav>
       </section>
 
       <!-- One book -->
       <section class="view view-book" data-name="book" aria-labelledby="book-title" hidden>
-        <div class="book-text">
+        <div class="book-head">
           <p class="label-blue" id="book-author"></p>
           <h1 class="book-title" id="book-title"></h1>
+          <p class="book-subtitle" id="book-other-title"></p>
           <p class="book-meta label" id="book-meta"></p>
-          <div class="book-desc" id="book-desc"></div>
-          <p class="book-by" id="book-by"></p>
-          <div class="book-actions">
-            <a class="btn btn-outline" id="book-edit" href="#/">Edit details</a>
-            <button class="btn-text" type="button" id="book-remove">Remove from shelf</button>
+
+          <div class="rating" id="rating">
+            <p class="section-label" id="rating-label">Valoració</p>
+            <div class="stars" id="stars"></div>
           </div>
-          <nav class="book-nav" aria-label="Other books">
+
+          <div class="book-actions" id="book-actions">
+            <button class="btn btn-solid" type="button" id="book-read" hidden>L’he llegit</button>
+            <a class="btn btn-outline" id="book-edit" href="#/">Edita els detalls</a>
+            <button class="btn-text" type="button" id="book-remove">Treu de la prestatgeria</button>
+          </div>
+        </div>
+
+        <div class="book-side">
+          <div class="book-figure" id="book-figure" aria-hidden="true"></div>
+          <section class="synopsis" aria-labelledby="syn-label">
+            <h2 class="section-label" id="syn-label">Sinopsi</h2>
+            <div class="book-desc" id="book-desc"></div>
+          </section>
+        </div>
+
+        <div class="book-more">
+          <section class="block" aria-labelledby="review-label">
+            <h2 class="section-label" id="review-label">La meva ressenya</h2>
+            <div class="review-text" id="review-text"></div>
+            <form class="review-form" id="review-form" hidden>
+              <label class="sr-only" for="review-input">Ressenya</label>
+              <textarea id="review-input" rows="5" maxlength="6000" placeholder="Què t’ha semblat?"></textarea>
+              <div class="form-actions">
+                <button class="btn btn-solid" type="submit">Desa la ressenya</button>
+                <button class="btn-text" type="button" id="review-cancel">Cancel·la</button>
+              </div>
+            </form>
+            <button class="btn-link small" type="button" id="review-open" hidden>Escriu una ressenya</button>
+          </section>
+
+          <section class="block" aria-labelledby="quotes-label">
+            <h2 class="section-label" id="quotes-label">Cites preferides</h2>
+            <ul class="quotes" id="quotes"></ul>
+            <form class="quote-form" id="quote-form" hidden>
+              <label class="sr-only" for="quote-input">Cita</label>
+              <textarea id="quote-input" rows="3" maxlength="1500" placeholder="Escriu la cita…"></textarea>
+              <div class="quote-row">
+                <label class="sr-only" for="quote-page">Pàgina</label>
+                <input id="quote-page" maxlength="20" placeholder="Pàgina (opcional)">
+                <button class="btn btn-outline" type="submit">Afegeix la cita</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="block" aria-labelledby="comments-label">
+            <h2 class="section-label" id="comments-label">Comentaris</h2>
+            <ul class="comments" id="comments"></ul>
+            <form class="comment-form" id="comment-form">
+              <label class="sr-only" for="comment-input">Comentari</label>
+              <textarea id="comment-input" rows="3" maxlength="2000" placeholder="Escriu un comentari…"></textarea>
+              <div class="form-actions"><button class="btn btn-outline" type="submit">Publica</button></div>
+            </form>
+          </section>
+
+          <nav class="book-nav" aria-label="Altres llibres">
             <a id="book-prev" href="#/">← <span></span></a>
             <a id="book-next" href="#/"><span></span> →</a>
           </nav>
         </div>
-        <div class="book-figure" id="book-figure" aria-hidden="true"></div>
       </section>
 
       <!-- Add or edit a book -->
       <section class="view view-edit" data-name="edit" aria-labelledby="edit-title" hidden>
         <div class="edit-main">
-          <h1 class="edit-title" id="edit-title">Add a book</h1>
+          <h1 class="edit-title" id="edit-title">Afegeix un llibre</h1>
 
           <form class="search" id="search-form" role="search">
-            <label class="label" for="search-q">Find it by title, author or ISBN</label>
+            <label class="label" for="search-q">Cerca’l pel títol, l’autor o l’ISBN</label>
             <div class="search-row">
-              <input id="search-q" type="search" autocomplete="off" placeholder="e.g. Cien años de soledad">
-              <button class="btn btn-solid" type="submit">Search</button>
+              <input id="search-q" type="search" autocomplete="off" placeholder="p. ex. Orgull i prejudici">
+              <button class="btn btn-solid" type="submit">Cerca</button>
             </div>
-            <p class="hint">Results come from Open Library. <button class="btn-link" type="button" id="manual-btn">Add it by hand instead</button></p>
+            <p class="hint">Els resultats provenen d’Open Library. <button class="btn-link" type="button" id="manual-btn">Afegeix-lo a mà</button></p>
           </form>
           <p class="search-status" id="search-status" role="status" aria-live="polite"></p>
           <ul class="results" id="results"></ul>
 
           <form class="book-form" id="book-form" novalidate hidden>
+            <fieldset class="field">
+              <legend>Títol en</legend>
+              <div class="segmented small" id="title-lang" role="group" aria-label="Llengua del títol">
+                <button type="button" data-lang="ca" aria-pressed="true">Català</button>
+                <button type="button" data-lang="en" aria-pressed="false">Anglès</button>
+              </div>
+              <div class="title-field" data-lang="ca">
+                <label class="sr-only" for="f-title">Títol en català</label>
+                <input id="f-title" name="title" maxlength="300" placeholder="Títol en català">
+              </div>
+              <div class="title-field" data-lang="en" hidden>
+                <label class="sr-only" for="f-title-en">Títol en anglès</label>
+                <input id="f-title-en" name="title_en" maxlength="300" placeholder="Títol en anglès">
+              </div>
+              <p class="hint" id="title-hint">Pots posar-hi els dos títols: tria la llengua per escriure l’altre.</p>
+            </fieldset>
             <div class="field">
-              <label for="f-title">Title <span class="hint-inline">in the language it was first published</span></label>
-              <input id="f-title" name="title" maxlength="300" required>
-            </div>
-            <div class="field">
-              <label for="f-author">Author</label>
+              <label for="f-author">Autor/a</label>
               <input id="f-author" name="author" maxlength="200">
             </div>
             <div class="field-row">
-              <div class="field"><label for="f-year">Year published</label><input id="f-year" name="year" inputmode="numeric" maxlength="5"></div>
-              <div class="field"><label for="f-pages">Pages</label><input id="f-pages" name="pages" inputmode="numeric" maxlength="5"></div>
-              <div class="field"><label for="f-genre">Genre</label><input id="f-genre" name="genre" maxlength="60" placeholder="e.g. Novel"></div>
+              <div class="field"><label for="f-year">Any de publicació</label><input id="f-year" name="year" inputmode="numeric" maxlength="5"></div>
+              <div class="field"><label for="f-pages">Pàgines</label><input id="f-pages" name="pages" inputmode="numeric" maxlength="5"></div>
+              <div class="field"><label for="f-genre">Gènere</label><input id="f-genre" name="genre" maxlength="60" placeholder="p. ex. Novel·la"></div>
             </div>
             <div class="field">
-              <label for="f-desc">About the book</label>
+              <label for="f-desc">Sinopsi</label>
               <textarea id="f-desc" name="description" rows="4" maxlength="4000"></textarea>
             </div>
 
             <fieldset class="field">
-              <legend>Cover</legend>
+              <legend>Coberta</legend>
               <div class="cover-row">
-                <label class="btn btn-outline file-btn">Upload a photo<input type="file" id="f-cover" accept="image/*"></label>
-                <button class="btn-text" type="button" id="f-cover-clear">Remove cover</button>
+                <label class="btn btn-outline file-btn">Puja una foto<input type="file" id="f-cover" accept="image/*"></label>
+                <button class="btn-text" type="button" id="f-cover-clear">Treu la coberta</button>
               </div>
-              <p class="hint">No cover? The book gets a printed cover with its title.</p>
+              <p class="hint">Sense coberta? El llibre en tindrà una d’impresa amb el títol.</p>
             </fieldset>
 
             <fieldset class="field">
-              <legend>Spine colour</legend>
+              <legend>Color del llom</legend>
               <div class="swatches" id="swatches"></div>
+              <p class="hint">El primer color surt de la coberta.</p>
+            </fieldset>
+
+            <fieldset class="field" id="list-field">
+              <legend>On el poses?</legend>
+              <div class="segmented small" id="f-list" role="group" aria-label="Llista">
+                <button type="button" data-list="shelf" aria-pressed="true">Llegits</button>
+                <button type="button" data-list="wishlist" aria-pressed="false">Per llegir</button>
+              </div>
             </fieldset>
 
             <p class="form-error" id="book-error" role="alert"></p>
             <div class="form-actions">
-              <button class="btn btn-solid" type="submit" id="book-save">Add to shelf</button>
-              <a class="btn-text" id="book-cancel" href="#/">Cancel</a>
+              <button class="btn btn-solid" type="submit" id="book-save">Afegeix a la prestatgeria</button>
+              <a class="btn-text" id="book-cancel" href="#/">Cancel·la</a>
             </div>
           </form>
         </div>
 
-        <aside class="edit-preview" aria-label="Preview">
+        <aside class="edit-preview" aria-label="Previsualització">
           <div class="preview-stage" id="preview-stage" aria-hidden="true"></div>
-          <p class="label preview-note" id="preview-note">Pick a book to see it here</p>
+          <p class="label preview-note" id="preview-note">Tria un llibre per veure’l aquí</p>
         </aside>
+      </section>
+
+      <!-- Everyone's shelves -->
+      <section class="view view-members" data-name="members" aria-labelledby="members-title" hidden>
+        <h1 class="members-title" id="members-title">Prestatgeries</h1>
+        <p class="members-intro">Mira què llegeixen els altres, llegeix les seves ressenyes i deixa’ls un comentari.</p>
+        <ul class="members" id="members"></ul>
       </section>
     </main>
 
     <footer class="foot">
       <p class="foot-left label" id="foot-left">Larita's Book Shelf</p>
       <p class="foot-right label" id="foot-right" hidden>
-        <span id="foot-user"></span> · <button class="btn-link" type="button" id="sign-out">Sign out</button>
+        <span id="foot-user"></span> · <button class="btn-link" type="button" id="sign-out">Tanca la sessió</button>
       </p>
     </footer>
   </div>
 
   <dialog class="confirm" id="confirm" aria-labelledby="confirm-title">
     <form method="dialog">
-      <p class="confirm-title" id="confirm-title">Remove this book?</p>
+      <p class="confirm-title" id="confirm-title">Vols treure aquest llibre?</p>
       <p class="confirm-text" id="confirm-text"></p>
       <div class="form-actions">
-        <button class="btn btn-solid" value="yes">Remove</button>
-        <button class="btn-text" value="no">Keep it</button>
+        <button class="btn btn-solid" value="yes" id="confirm-yes">Treu-lo</button>
+        <button class="btn-text" value="no" id="confirm-no">Deixa’l</button>
       </div>
     </form>
   </dialog>
@@ -220,10 +312,10 @@
 
   <script src="js/vendor/gsap.min.js"></script>
   <script src="js/vendor/supabase.js"></script>
-  <script src="js/config.js?v=1"></script>
-  <script src="js/db.js?v=1"></script>
-  <script src="js/books.js?v=1"></script>
-  <script src="js/shelf.js?v=1"></script>
-  <script src="js/app.js?v=1"></script>
+  <script src="js/config.js?v=2"></script>
+  <script src="js/db.js?v=2"></script>
+  <script src="js/books.js?v=2"></script>
+  <script src="js/shelf.js?v=2"></script>
+  <script src="js/app.js?v=2"></script>
 </body>
 </html>
