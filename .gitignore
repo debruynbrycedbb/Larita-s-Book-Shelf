@@ -1,0 +1,4 @@
+# Private setup files (contain passwords) — never commit
+*seed*.sql
+private/
+.DS_Store

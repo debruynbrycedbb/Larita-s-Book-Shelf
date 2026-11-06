@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Larita's Book Shelf</title>
+  <meta name="description" content="A personal book shelf: every book you've read, lined up spine by spine. Pick one and it turns to show its cover.">
+  <meta name="theme-color" content="#edebe6">
+  <meta property="og:title" content="Larita's Book Shelf">
+  <meta property="og:description" content="Every book, spine by spine. Pick one and it turns to show its cover.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/newsreader-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/spine-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="app" id="app" data-view="loading">
+    <header class="masthead">
+      <a class="back" id="back" href="#/" hidden>
+        <span class="back-circle" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24"><path d="M20 12H5m6-7-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+        </span>
+        <span class="back-label">Shelf</span>
+      </a>
+
+      <a class="brand" href="#/" aria-label="Larita's Book Shelf, home">
+        <span class="brand-title">Larita's Book Shelf</span>
+        <span class="brand-sub" id="brand-sub"></span>
+      </a>
+
+      <div class="masthead-end">
+        <a class="btn btn-outline" id="add-link" href="#/add" hidden>Add a book <span aria-hidden="true">+</span></a>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <!-- Loading -->
+      <section class="view view-loading" data-name="loading">
+        <p class="label">Opening the shelf…</p>
+      </section>
+
+      <!-- Sign in / create a shelf -->
+      <section class="view view-signin" data-name="signin" aria-labelledby="signin-title" hidden>
+        <div class="mini-shelf" aria-hidden="true">
+          <span style="--c:#2340b8"></span><span style="--c:#e6dcc6"></span><span style="--c:#1f1d1b"></span><span style="--c:#1f4f43"></span><span style="--c:#b4442e"></span><span style="--c:#c8973c"></span><span style="--c:#4a5b6c"></span>
+        </div>
+        <h1 class="signin-title" id="signin-title">Open your shelf</h1>
+
+        <div class="segmented" role="tablist" aria-label="Sign in or create a shelf">
+          <button type="button" role="tab" id="tab-in" aria-selected="true" aria-controls="form-auth">Sign in</button>
+          <button type="button" role="tab" id="tab-up" aria-selected="false" aria-controls="form-auth">Create a shelf</button>
+        </div>
+
+        <form class="auth-form" id="form-auth" novalidate>
+          <div class="field only-up" hidden>
+            <label for="auth-name">Your name</label>
+            <input id="auth-name" name="name" autocomplete="given-name" maxlength="40">
+            <p class="hint">Shown at the top of your shelf.</p>
+          </div>
+          <div class="field">
+            <label for="auth-user">Username</label>
+            <input id="auth-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24" required>
+            <p class="hint only-up" hidden>2–24 letters, numbers, dots, dashes or underscores.</p>
+          </div>
+          <div class="field">
+            <label for="auth-pass">Password</label>
+            <input id="auth-pass" name="password" type="password" autocomplete="current-password" maxlength="72" required>
+            <p class="hint only-up" hidden>At least 8 characters.</p>
+          </div>
+          <div class="field only-up" hidden>
+            <label for="auth-pass2">Repeat password</label>
+            <input id="auth-pass2" name="password2" type="password" autocomplete="new-password" maxlength="72">
+          </div>
+          <p class="form-error" id="auth-error" role="alert"></p>
+          <button class="btn btn-solid btn-wide" type="submit" id="auth-submit">Sign in</button>
+        </form>
+      </section>
+
+      <!-- The shelf -->
+      <section class="view view-shelf" data-name="shelf" aria-labelledby="shelf-heading" hidden>
+        <h1 class="sr-only" id="shelf-heading">Book shelf</h1>
+        <div class="filters" id="filters" role="group" aria-label="Filter by decade published"></div>
+
+        <div class="stage" id="stage" tabindex="0" role="region" aria-roledescription="carousel"
+             aria-label="Books. Use the left and right arrow keys to move, Enter to open.">
+          <div class="empty" id="empty">
+            <div class="empty-spines" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+            <p class="empty-title">Your shelf is empty</p>
+            <p class="empty-text">Add the first book and it will appear here, spine out.</p>
+            <a class="btn btn-solid" href="#/add">Add a book</a>
+          </div>
+        </div>
+
+        <div class="caption-row">
+          <button class="arrow arrow-prev" id="prev" type="button" aria-label="Previous book">
+            <svg viewBox="0 0 32 16" width="32" height="16" aria-hidden="true"><path d="M31 8H2m6-6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          </button>
+          <div class="caption" id="caption" aria-hidden="true">
+            <p class="caption-title" id="cap-title"></p>
+            <p class="caption-author label-blue" id="cap-author"></p>
+            <p class="caption-year" id="cap-year"></p>
+          </div>
+          <button class="arrow arrow-next" id="next" type="button" aria-label="Next book">
+            <svg viewBox="0 0 32 16" width="32" height="16" aria-hidden="true"><path d="M1 8h29m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          </button>
+        </div>
+
+        <p class="sr-only" id="live" aria-live="polite"></p>
+        <nav class="sr-only" aria-label="All books on the shelf"><ol id="book-list"></ol></nav>
+      </section>
+
+      <!-- One book -->
+      <section class="view view-book" data-name="book" aria-labelledby="book-title" hidden>
+        <div class="book-text">
+          <p class="label-blue" id="book-author"></p>
+          <h1 class="book-title" id="book-title"></h1>
+          <p class="book-meta label" id="book-meta"></p>
+          <div class="book-desc" id="book-desc"></div>
+          <p class="book-by" id="book-by"></p>
+          <div class="book-actions">
+            <a class="btn btn-outline" id="book-edit" href="#/">Edit details</a>
+            <button class="btn-text" type="button" id="book-remove">Remove from shelf</button>
+          </div>
+          <nav class="book-nav" aria-label="Other books">
+            <a id="book-prev" href="#/">← <span></span></a>
+            <a id="book-next" href="#/"><span></span> →</a>
+          </nav>
+        </div>
+        <div class="book-figure" id="book-figure" aria-hidden="true"></div>
+      </section>
+
+      <!-- Add or edit a book -->
+      <section class="view view-edit" data-name="edit" aria-labelledby="edit-title" hidden>
+        <div class="edit-main">
+          <h1 class="edit-title" id="edit-title">Add a book</h1>
+
+          <form class="search" id="search-form" role="search">
+            <label class="label" for="search-q">Find it by title, author or ISBN</label>
+            <div class="search-row">
+              <input id="search-q" type="search" autocomplete="off" placeholder="e.g. Cien años de soledad">
+              <button class="btn btn-solid" type="submit">Search</button>
+            </div>
+            <p class="hint">Results come from Open Library. <button class="btn-link" type="button" id="manual-btn">Add it by hand instead</button></p>
+          </form>
+          <p class="search-status" id="search-status" role="status" aria-live="polite"></p>
+          <ul class="results" id="results"></ul>
+
+          <form class="book-form" id="book-form" novalidate hidden>
+            <div class="field">
+              <label for="f-title">Title <span class="hint-inline">in the language it was first published</span></label>
+              <input id="f-title" name="title" maxlength="300" required>
+            </div>
+            <div class="field">
+              <label for="f-author">Author</label>
+              <input id="f-author" name="author" maxlength="200">
+            </div>
+            <div class="field-row">
+              <div class="field"><label for="f-year">Year published</label><input id="f-year" name="year" inputmode="numeric" maxlength="5"></div>
+              <div class="field"><label for="f-pages">Pages</label><input id="f-pages" name="pages" inputmode="numeric" maxlength="5"></div>
+              <div class="field"><label for="f-genre">Genre</label><input id="f-genre" name="genre" maxlength="60" placeholder="e.g. Novel"></div>
+            </div>
+            <div class="field">
+              <label for="f-desc">About the book</label>
+              <textarea id="f-desc" name="description" rows="4" maxlength="4000"></textarea>
+            </div>
+
+            <fieldset class="field">
+              <legend>Cover</legend>
+              <div class="cover-row">
+                <label class="btn btn-outline file-btn">Upload a photo<input type="file" id="f-cover" accept="image/*"></label>
+                <button class="btn-text" type="button" id="f-cover-clear">Remove cover</button>
+              </div>
+              <p class="hint">No cover? The book gets a printed cover with its title.</p>
+            </fieldset>
+
+            <fieldset class="field">
+              <legend>Spine colour</legend>
+              <div class="swatches" id="swatches"></div>
+            </fieldset>
+
+            <p class="form-error" id="book-error" role="alert"></p>
+            <div class="form-actions">
+              <button class="btn btn-solid" type="submit" id="book-save">Add to shelf</button>
+              <a class="btn-text" id="book-cancel" href="#/">Cancel</a>
+            </div>
+          </form>
+        </div>
+
+        <aside class="edit-preview" aria-label="Preview">
+          <div class="preview-stage" id="preview-stage" aria-hidden="true"></div>
+          <p class="label preview-note" id="preview-note">Pick a book to see it here</p>
+        </aside>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p class="foot-left label" id="foot-left">Larita's Book Shelf</p>
+      <p class="foot-right label" id="foot-right" hidden>
+        <span id="foot-user"></span> · <button class="btn-link" type="button" id="sign-out">Sign out</button>
+      </p>
+    </footer>
+  </div>
+
+  <dialog class="confirm" id="confirm" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <p class="confirm-title" id="confirm-title">Remove this book?</p>
+      <p class="confirm-text" id="confirm-text"></p>
+      <div class="form-actions">
+        <button class="btn btn-solid" value="yes">Remove</button>
+        <button class="btn-text" value="no">Keep it</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/vendor/gsap.min.js"></script>
+  <script src="js/vendor/supabase.js"></script>
+  <script src="js/config.js?v=1"></script>
+  <script src="js/db.js?v=1"></script>
+  <script src="js/books.js?v=1"></script>
+  <script src="js/shelf.js?v=1"></script>
+  <script src="js/app.js?v=1"></script>
+</body>
+</html>
