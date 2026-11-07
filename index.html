@@ -13,7 +13,7 @@
   <link rel="preload" href="assets/fonts/newsreader-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/spine-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <a class="skip-link" href="#main">Vés al contingut</a>
@@ -30,6 +30,8 @@
       <nav class="topnav" id="topnav" aria-label="Prestatgeries" hidden>
         <a href="#/" id="nav-mine">La meva prestatgeria</a>
         <a href="#/infantil" id="nav-kids">Infantil</a>
+        <a href="#/top-10" id="nav-top">Top 10</a>
+        <a href="#/cerca" id="nav-search">Cerca</a>
         <a href="#/prestatgeries" id="nav-all">Prestatgeries</a>
       </nav>
 
@@ -321,6 +323,46 @@
         </aside>
       </section>
 
+      <!-- Everyone's top 10 -->
+      <section class="view view-top" data-name="top" aria-labelledby="top-title" hidden>
+        <header class="page-head">
+          <h1 class="page-title" id="top-title">Top 10</h1>
+          <p class="page-intro">Els deu llibres millor valorats de cada lector, de 10 estrelles cap avall.</p>
+        </header>
+        <div class="top-list" id="top-list"></div>
+      </section>
+
+      <!-- Search everyone's collections by rating -->
+      <section class="view view-search" data-name="search" aria-labelledby="search-title" hidden>
+        <header class="page-head">
+          <h1 class="page-title" id="search-title">Cerca</h1>
+          <p class="page-intro">Busca a les col·leccions de tothom per valoració.</p>
+        </header>
+        <form class="rate-filters" id="rate-filters" role="search" aria-label="Filtres de cerca">
+          <fieldset class="rf rf-stars">
+            <legend>Valoració</legend>
+            <div class="rf-star-row" id="rf-stars" role="radiogroup" aria-label="Estrelles"></div>
+            <div class="segmented small" id="rf-mode" role="group" aria-label="Com comparar">
+              <button type="button" data-mode="min" aria-pressed="true">o més</button>
+              <button type="button" data-mode="exact" aria-pressed="false">exactament</button>
+            </div>
+          </fieldset>
+          <div class="rf-row">
+            <label class="rf"><span>Persona</span><select id="rf-person"></select></label>
+            <label class="rf"><span>Prestatgeria</span>
+              <select id="rf-section">
+                <option value="">Totes</option>
+                <option value="main">Prestatgeria</option>
+                <option value="kids">Infantil</option>
+              </select>
+            </label>
+            <label class="rf rf-text"><span>Títol o autor</span><input id="rf-text" type="search" autocomplete="off" placeholder="Opcional"></label>
+          </div>
+        </form>
+        <p class="search-status" id="rf-status" role="status" aria-live="polite"></p>
+        <ul class="rated-results" id="rf-results"></ul>
+      </section>
+
       <!-- Everyone's shelves -->
       <section class="view view-members" data-name="members" aria-labelledby="members-title" hidden>
         <h1 class="members-title" id="members-title">Prestatgeries</h1>
@@ -352,10 +394,10 @@
 
   <script src="js/vendor/gsap.min.js"></script>
   <script src="js/vendor/supabase.js"></script>
-  <script src="js/config.js?v=4"></script>
-  <script src="js/db.js?v=4"></script>
-  <script src="js/books.js?v=4"></script>
-  <script src="js/shelf.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/config.js?v=5"></script>
+  <script src="js/db.js?v=5"></script>
+  <script src="js/books.js?v=5"></script>
+  <script src="js/shelf.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

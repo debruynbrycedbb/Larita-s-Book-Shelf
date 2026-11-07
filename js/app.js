@@ -9,6 +9,8 @@
  *   #/llibre/<id>         one book
  *   #/afegeix             add a book                (#/afegeix[/infantil][/per-llegir])
  *   #/edita/<id>          edit a book
+ *   #/top-10              everyone's ten highest-rated books
+ *   #/cerca               search everyone's rated books by stars
  *   #/prestatgeries       everyone's shelves
  *   #/entra               sign in or create a shelf
  */
@@ -37,7 +39,12 @@
     editingId: null,
     searchSeq: 0,
     titleLang: 'ca',
-    book: null          // book on the book page
+    book: null,         // book on the book page
+    returnTo: null,     // { href, label } when a book was opened from Top 10 / Cerca
+    shelves: null,      // members, for Top 10 and Cerca
+    rf: { stars: 8, mode: 'min', person: '', section: '', text: '' },
+    rfKey: '',
+    rfBooks: []
   };
 
   // Title language for the whole site, remembered in this browser.
@@ -202,6 +209,8 @@
     $('nav-mine').setAttribute('aria-current', String(name === 'shelf' && isMine() && state.section === 'main'));
     $('nav-kids').setAttribute('aria-current', String(name === 'shelf' && isMine() && state.section === 'kids'));
     $('nav-all').setAttribute('aria-current', String(name === 'members'));
+    $('nav-top').setAttribute('aria-current', String(name === 'top'));
+    $('nav-search').setAttribute('aria-current', String(name === 'search'));
   }
 
   function setHeader() {
@@ -398,6 +407,8 @@
     if (state.owner) state.books = state.cache.get(state.owner.id) || state.books;
     if (state.view === 'shelf') { refreshShelf(current && current.id); }
     else if (state.view === 'book' && state.book) { renderBookPage(state.book.id); }
+    else if (state.view === 'top') { renderTop(); }
+    else if (state.view === 'search') { renderRated(); }
     setHeader();
   }
 
@@ -485,8 +496,8 @@
     const list = (book.list || 'shelf');
     const section = sectionOf(book);
     if (state.list !== list || state.section !== section) { state.list = list; state.section = section; state.decade = 'all'; state.ageFilter = null; }
-    $('back').href = shelfHref(book.profile_id, list, section);
-    $('back-label').textContent = shelfLabel(list, section);
+    $('back').href = state.returnTo ? state.returnTo.href : shelfHref(book.profile_id, list, section);
+    $('back-label').textContent = state.returnTo ? state.returnTo.label : shelfLabel(list, section);
     setHeader();
 
     $('book-author').textContent = book.author || '';
@@ -1246,6 +1257,209 @@
     $('book-form').addEventListener('submit', saveBook);
   }
 
+  // ------------------------------------------------- Top 10 and Cerca
+
+  // A small book standing at a slight angle, as on the shelf.
+  function miniBook(book, H) {
+    const { root, dims } = Books.build(book, { H });
+    const box = el('span', 'mini-book');
+    box.style.width = Math.round(dims.W + dims.T * 0.6) + 'px';
+    box.style.height = H + 'px';
+    box.setAttribute('aria-hidden', 'true');
+    const holder = el('span', 'figure-book');
+    holder.appendChild(root);
+    root.style.transform = 'rotateY(24deg)';
+    const shadow = el('span', 'mini-shadow');
+    shadow.style.width = dims.W * 1.15 + 'px';
+    box.append(shadow, holder);
+    return box;
+  }
+
+  function starLine(r) {
+    const s = el('span', 'mini-stars');
+    s.innerHTML = STAR;
+    s.append(el('span', null, `${r}/10`));
+    s.setAttribute('aria-label', `${r} de 10 estrelles`);
+    return s;
+  }
+
+  async function getShelves() {
+    if (!state.shelves) state.shelves = await DB.listShelves();
+    return state.shelves;
+  }
+
+  function membersFirstMe(shelves) {
+    return shelves.slice().sort((a, b) =>
+      (a.id === state.me.id ? -1 : b.id === state.me.id ? 1 : a.display_name.localeCompare(b.display_name, 'ca')));
+  }
+
+  function openFrom(href, label) {
+    return () => { state.returnTo = { href, label }; };
+  }
+
+  async function renderTop() {
+    const box = $('top-list');
+    box.innerHTML = '';
+    box.appendChild(el('p', 'muted', 'Carregant…'));
+    try {
+      state.shelves = null;
+      const [shelves, books] = await Promise.all([getShelves(), DB.topBooks()]);
+      if (state.view !== 'top') return;
+      box.innerHTML = '';
+      const byOwner = new Map();
+      for (const b of books) {
+        if (!byOwner.has(b.profile_id)) byOwner.set(b.profile_id, []);
+        byOwner.get(b.profile_id).push(b);
+      }
+      const rated = [], unrated = [];
+      for (const m of membersFirstMe(shelves)) (byOwner.has(m.id) ? rated : unrated).push(m);
+      for (const m of rated) {
+        const list = byOwner.get(m.id).sort((a, b) => b.rating - a.rating || String(a.created_at).localeCompare(String(b.created_at)));
+        const sec = el('section', 'top-member');
+        const head = el('div', 'top-head');
+        const h = el('h2', 'top-name', m.display_name);
+        if (m.id === state.me.id) h.appendChild(el('span', 'member-you', 'tu'));
+        const link = el('a', 'top-shelf-link', 'Prestatgeria →');
+        link.href = shelfHref(m.id, 'shelf', 'main');
+        link.setAttribute('aria-label', `Prestatgeria ${deName(m.display_name)}`);
+        head.append(h, el('span', 'top-count', list.length < 10 ? `${plural(list.length, 'llibre valorat', 'llibres valorats')}` : 'Top 10'), link);
+        const ol = el('ol', 'top-row');
+        ol.setAttribute('aria-label', `Top 10 ${deName(m.display_name)}`);
+        list.forEach((b, i) => {
+          const li = el('li');
+          const a = el('a', 'top-card');
+          a.href = `#/llibre/${b.id}`;
+          a.addEventListener('click', openFrom('#/top-10', 'Top 10'));
+          const meta = el('span', 'top-meta');
+          meta.append(el('span', 'top-title', T(b)), el('span', 'top-author', b.author || ''), starLine(b.rating));
+          a.append(el('span', 'top-rank', String(i + 1)), miniBook(b, window.innerWidth >= 1100 ? 128 : 150), meta);
+          li.appendChild(a);
+          ol.appendChild(li);
+        });
+        sec.append(head, ol);
+        box.appendChild(sec);
+      }
+      if (unrated.length) {
+        const p = el('p', 'top-unrated');
+        p.textContent = `Encara sense valoracions: ${unrated.map(m => m.display_name).join(', ')}.`;
+        box.appendChild(p);
+      }
+      if (!rated.length) box.prepend(el('p', 'muted', 'Encara ningú no ha valorat cap llibre. Valora’ls amb les estrelles de cada llibre i apareixeran aquí.'));
+    } catch (e) {
+      box.innerHTML = '';
+      box.appendChild(el('p', 'muted', e.message));
+    }
+  }
+
+  // Cerca: rated books across everyone's collections
+  function renderStarPicker() {
+    const row = $('rf-stars');
+    row.innerHTML = '';
+    for (let i = 1; i <= 10; i++) {
+      const b = el('button', 'star');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(i === state.rf.stars));
+      b.setAttribute('aria-label', i === 1 ? '1 estrella' : `${i} estrelles`);
+      b.innerHTML = STAR;
+      b.classList.toggle('on', state.rf.mode === 'exact' ? i === state.rf.stars : i <= state.rf.stars);
+      b.addEventListener('click', () => { state.rf.stars = i; renderStarPicker(); runRated(); });
+      b.addEventListener('mouseenter', () => paint(i));
+      row.appendChild(b);
+    }
+    const label = el('span', 'score', state.rf.mode === 'exact' ? `${state.rf.stars}` : `${state.rf.stars}+`);
+    row.appendChild(label);
+    function paint(n) { [...row.querySelectorAll('.star')].forEach((s, j) => s.classList.toggle('preview', state.rf.mode === 'exact' ? j === n - 1 : j < n)); }
+    row.onmouseleave = () => paint(0);
+    for (const b of document.querySelectorAll('#rf-mode button')) b.setAttribute('aria-pressed', String(b.dataset.mode === state.rf.mode));
+  }
+
+  async function renderRated() {
+    renderStarPicker();
+    const sel = $('rf-person');
+    try {
+      const shelves = await getShelves();
+      sel.innerHTML = '';
+      const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); };
+      opt('', 'Tothom');
+      for (const m of membersFirstMe(shelves)) opt(m.id, m.id === state.me.id ? `${m.display_name} (tu)` : m.display_name);
+      sel.value = state.rf.person;
+      if (sel.value !== state.rf.person) state.rf.person = '';
+    } catch (e) { /* the search below reports problems */ }
+    $('rf-section').value = state.rf.section;
+    $('rf-text').value = state.rf.text;
+    state.rfKey = '';
+    runRated();
+  }
+
+  async function runRated() {
+    const f = state.rf;
+    const min = f.stars, max = f.mode === 'exact' ? f.stars : 10;
+    const key = `${min}-${max}-${f.person}-${f.section}`;
+    const status = $('rf-status');
+    if (key !== state.rfKey) {
+      state.rfKey = key;
+      status.textContent = 'Cercant…';
+      try {
+        const books = await DB.searchRated({ min, max, profileId: f.person || null, section: f.section || null });
+        if (state.rfKey !== key) return;
+        state.rfBooks = books;
+      } catch (e) {
+        status.textContent = e.message;
+        $('rf-results').innerHTML = '';
+        return;
+      }
+    }
+    showRated();
+  }
+
+  function showRated() {
+    const f = state.rf;
+    const names = new Map((state.shelves || []).map(m => [m.id, m.display_name]));
+    const q = norm(f.text);
+    let list = state.rfBooks;
+    if (q) list = list.filter(b => norm([b.title, b.title_en, b.author].join(' ')).includes(q));
+    list = list.slice().sort((a, b) => b.rating - a.rating || T(a).localeCompare(T(b), 'ca'));
+    const ul = $('rf-results');
+    ul.innerHTML = '';
+    const stars = f.stars === 1 ? 'd’1 estrella' : `de ${f.stars} estrelles`;
+    const what = f.mode === 'exact' || f.stars === 10 ? stars : (f.stars === 1 ? 'amb valoració' : `${stars} o més`);
+    $('rf-status').textContent = list.length
+      ? `${plural(list.length, 'llibre', 'llibres')} ${what}`
+      : `No hi ha cap llibre ${what} amb aquests filtres.`;
+    for (const b of list) {
+      const li = el('li');
+      const a = el('a', 'rated-card');
+      a.href = `#/llibre/${b.id}`;
+      a.addEventListener('click', openFrom('#/cerca', 'Cerca'));
+      const text = el('span', 'rated-text');
+      const owner = names.get(b.profile_id) || '';
+      const meta = el('span', 'rated-meta');
+      meta.append(starLine(b.rating));
+      if (owner) meta.append(el('span', 'rated-owner', `${b.profile_id === state.me.id ? 'La teva' : 'De ' + owner}`));
+      if ((b.section || 'main') === 'kids') meta.append(el('span', 'rated-tag', 'Infantil'));
+      text.append(el('span', 'rated-title', T(b)), el('span', 'rated-author', b.author || ''), meta);
+      a.append(miniBook(b, 104), text);
+      li.appendChild(a);
+      ul.appendChild(li);
+    }
+  }
+
+  function bindRated() {
+    for (const b of document.querySelectorAll('#rf-mode button')) {
+      b.addEventListener('click', () => { state.rf.mode = b.dataset.mode; renderStarPicker(); runRated(); });
+    }
+    $('rf-person').addEventListener('change', e => { state.rf.person = e.target.value; runRated(); });
+    $('rf-section').addEventListener('change', e => { state.rf.section = e.target.value; runRated(); });
+    let t;
+    $('rf-text').addEventListener('input', e => {
+      state.rf.text = e.target.value;
+      clearTimeout(t);
+      t = setTimeout(showRated, 120);
+    });
+    $('rate-filters').addEventListener('submit', e => e.preventDefault());
+  }
+
   // -------------------------------------------------------------- members
 
   async function renderMembers() {
@@ -1384,6 +1598,8 @@
   async function route() {
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (_) { return x; } });
     const [page, a, b] = parts;
+    if (page !== 'llibre') state.returnTo = null;
+    if (page === 'prestatgeries') state.shelves = null;
     if (!state.me) {
       show('signin');
       setHeader();
@@ -1401,6 +1617,16 @@
         await loadOwner(state.me.id);
         show('edit');
         openEditView(a);
+      } else if (page === 'top-10') {
+        show('top');
+        state.owner = null;
+        setHeader();
+        renderTop();
+      } else if (page === 'cerca') {
+        show('search');
+        state.owner = null;
+        setHeader();
+        renderRated();
       } else if (page === 'prestatgeries') {
         show('members');
         state.owner = null;
@@ -1440,6 +1666,7 @@
     bindAuth();
     bindEdit();
     bindBookPage();
+    bindRated();
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || $('confirm').open) return;
       if (/^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) return;

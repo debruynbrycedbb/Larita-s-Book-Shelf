@@ -45,6 +45,10 @@ The site appears at `https://debruynbrycedbb.github.io/Larita-s-Book-Shelf/` aft
 
 **Infantil.** A separate children's shelf (menu: *Infantil*), with its own Llegits / Per llegir lists and the same book pages. Each children's book has a recommended age range, shown with the matching Catalan school year (Llar d'infants, P3–P5, Primària, ESO, Batxillerat) in a box on the book page, where the owner can set it. The shelf filters by age or by school year instead of by decade. A book can be moved between the two shelves in *Edita els detalls*.
 
+**Top 10.** One page shows every member's ten highest-rated books (both shelves), ranked by stars; ties keep the order the books were added. Members with no ratings yet are listed underneath.
+
+**Cerca.** Search everyone's rated books by stars — "8 o més" or "exactament 8" — and narrow by person, by shelf (Prestatgeria / Infantil) and by title or author (accents ignored). Opening a book from Top 10 or Cerca brings you back there.
+
 **Each book's page** has the synopsis under the book, a rating out of 10 stars, the owner's review, favourite quotes (with optional page) and comments.
 
 **Adding books.** Search by title, author or ISBN — Google Books and Open Library are searched together, duplicates merged and Catalan editions listed first; «Només edicions en català» (on by default) hides the rest. Or add a book by hand. Catalan synopses usually come from Google Books; the other-language title comes from Open Library’s editions; you choose which language you're typing in. The cover's shape sets the book's width, the page count its thickness, and the spine colour is taken from the cover and toned so every spine shares the same look — all editable. Uploaded cover photos are shrunk to a small WebP and stored with the book.

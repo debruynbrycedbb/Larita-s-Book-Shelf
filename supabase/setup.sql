@@ -1,5 +1,5 @@
 -- ============================================================================
--- Larita's Book Shelf — database setup (version 3)
+-- Larita's Book Shelf — database setup (version 4)
 --
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.
 -- It is safe to run again after changes (idempotent) and it upgrades an
@@ -359,6 +359,23 @@ as $$
    order by p.display_name
 $$;
 
+-- Version 4: each member's ten highest-rated books, for the Top 10 page.
+-- Runs with the caller's rights, so the normal rules apply (members only).
+create or replace function public.top_books(p_limit int default 10)
+returns setof public.books
+language sql stable
+set search_path = ''
+as $$
+  select (t.b).* from (
+    select b, row_number() over (partition by b.profile_id order by b.rating desc, b.created_at asc) as rn
+      from public.books b
+     where b.rating is not null
+  ) t
+  where t.rn <= least(greatest(coalesce(p_limit, 10), 1), 50)
+$$;
+
+create index if not exists books_rating on public.books (profile_id, rating desc) where rating is not null;
+
 -- Old attempt rows are only needed for the lockout window.
 create or replace function app_private.prune_attempts()
 returns trigger language plpgsql set search_path = '' as $$
@@ -380,6 +397,7 @@ revoke all on function public.sign_in(text, text)      from public, anon;
 revoke all on function public.sign_out()               from public, anon;
 revoke all on function public.whoami()                 from public, anon;
 revoke all on function public.list_shelves()           from public, anon;
+revoke all on function public.top_books(int)           from public, anon;
 grant execute on function public.current_profile_id()  to authenticated;
 grant execute on function public.is_member()           to authenticated;
 grant execute on function public.owns_book(uuid)       to authenticated;
@@ -388,3 +406,4 @@ grant execute on function public.sign_in(text, text)   to authenticated;
 grant execute on function public.sign_out()            to authenticated;
 grant execute on function public.whoami()              to authenticated;
 grant execute on function public.list_shelves()        to authenticated;
+grant execute on function public.top_books(int)        to authenticated;

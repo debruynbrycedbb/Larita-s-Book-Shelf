@@ -89,6 +89,26 @@
       return res.data;
     },
 
+    // Each member's ten highest-rated books (all shelves).
+    async topBooks() {
+      const res = await client.rpc('top_books', { p_limit: 10 });
+      if (res.error) fail(res.error);
+      return res.data || [];
+    },
+
+    // Rated books across everyone's collections.
+    // f = { min, max, profileId, section }
+    async searchRated(f) {
+      let q = client.from('books').select(COLS).not('rating', 'is', null)
+        .gte('rating', f.min).lte('rating', f.max)
+        .order('rating', { ascending: false }).order('created_at', { ascending: true }).limit(500);
+      if (f.profileId) q = q.eq('profile_id', f.profileId);
+      if (f.section) q = q.eq('section', f.section);
+      const res = await q;
+      if (res.error) fail(res.error);
+      return res.data || [];
+    },
+
     async listShelves() {
       const res = await client.rpc('list_shelves');
       if (res.error) fail(res.error);
