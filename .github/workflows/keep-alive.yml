@@ -1,1 +1,50 @@
-.github/workflows/keep-alive.yml
+# Keeps the free Supabase project awake.
+# Supabase pauses free projects after about 7 days with no activity. Every 3 days
+# this sends one small read request to the database. It uses only the publishable
+# key from js/config.js (already public) and changes nothing.
+# If the project is paused or unreachable, the run fails and GitHub emails you.
+
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '17 6 */3 * *'   # 06:17 UTC on every 3rd day of the month
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: read
+  actions: write              # only used to re-enable this workflow (see last step)
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ping the database
+        run: |
+          URL=$(grep -o "supabaseUrl: *'[^']*'" js/config.js | cut -d"'" -f2)
+          KEY=$(grep -o "supabaseKey: *'[^']*'" js/config.js | cut -d"'" -f2)
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "Could not read the Supabase address or key from js/config.js"; exit 1
+          fi
+          BODY=$(curl -s --max-time 30 -w '\n%{http_code}' "$URL/rest/v1/books?select=id&limit=1" -H "apikey: $KEY")
+          CODE=$(echo "$BODY" | tail -n1)
+          echo "HTTP $CODE"
+          echo "$BODY" | sed '$d' | head -c 300; echo
+          # Visitors who aren't signed in may not read books, so the database answers
+          # "permission denied" (42501). That answer still comes from the database,
+          # which is what counts as activity. Anything else means trouble.
+          if [ "$CODE" = "200" ] || echo "$BODY" | grep -q '"code":"42501"'; then
+            echo "Database answered: project is awake."
+          else
+            echo "::error::Supabase did not answer as expected. The project may be paused: open supabase.com and press Restore."
+            exit 1
+          fi
+
+      # GitHub switches off scheduled workflows in repos with no commits for 60 days.
+      # Re-enabling the workflow on every run stops that from happening.
+      - name: Keep this schedule switched on
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keep-alive.yml/enable"
